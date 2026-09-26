@@ -4,19 +4,26 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const connectDB = require('./config/db');
 
+const authRoutes = require('./routes/auth');
+
 // Connect to MongoDB
 connectDB();
 
 const app = express();
 
 // Global Middleware
+const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [];
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: allowedOrigins,
   credentials: true // Important for sending cookies
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Routes
+app.use('/api/auth', authRoutes);
 
 // Basic health check route
 app.get('/', (req, res) => {
