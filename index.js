@@ -8,6 +8,8 @@ const authRoutes = require('./routes/auth');
 const masterMenuRoutes = require('./routes/masterMenu');
 const platformSettingsRoutes = require('./routes/platformSettings');
 const restaurantRoutes = require('./routes/restaurant');
+const leadRoutes = require('./routes/lead');
+const qrTemplateRoutes = require('./routes/qrTemplate');
 
 // Connect to MongoDB
 connectDB();
@@ -24,7 +26,12 @@ app.use(cors({
   credentials: true // Important for sending cookies
 }));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Only parse urlencoded bodies for non-multipart requests so multer handles file upload streams directly
+app.use((req, res, next) => {
+  const contentType = req.headers['content-type'] || '';
+  if (contentType.includes('multipart/form-data')) return next();
+  return express.urlencoded({ extended: true })(req, res, next);
+});
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -33,6 +40,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/master-menu', masterMenuRoutes);
 app.use('/api/platform-settings', platformSettingsRoutes);
 app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/leads', leadRoutes);
+app.use('/api/qr-templates', qrTemplateRoutes);
 
 // Basic health check route
 app.get('/', (req, res) => {
