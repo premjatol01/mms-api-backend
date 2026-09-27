@@ -5,14 +5,17 @@ const path = require('path');
 const fs = require('fs');
 
 const {
-  getPlatformSettings,
-  updatePlatformSettings
-} = require('../controllers/platformSettings');
+  getRestaurants,
+  getRestaurant,
+  createRestaurant,
+  updateRestaurant,
+  bulkUpdateStatus,
+  toggleStatus
+} = require('../controllers/restaurant');
 
-// Set up multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dir = path.join(__dirname, '../public/uploads/platform');
+    const dir = path.join(__dirname, '../public/uploads/restaurants');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -26,8 +29,18 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
+router.route('/bulk/status')
+  .patch(bulkUpdateStatus);
+
 router.route('/')
-  .get(getPlatformSettings)
-  .put(upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }]), updatePlatformSettings);
+  .get(getRestaurants)
+  .post(upload.single('logo'), createRestaurant);
+
+router.route('/:id')
+  .get(getRestaurant)
+  .put(upload.single('logo'), updateRestaurant);
+
+router.route('/:id/status')
+  .patch(toggleStatus);
 
 module.exports = router;

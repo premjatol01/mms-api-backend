@@ -6,6 +6,8 @@ const connectDB = require('./config/db');
 
 const authRoutes = require('./routes/auth');
 const masterMenuRoutes = require('./routes/masterMenu');
+const platformSettingsRoutes = require('./routes/platformSettings');
+const restaurantRoutes = require('./routes/restaurant');
 
 // Connect to MongoDB
 connectDB();
@@ -29,6 +31,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/master-menu', masterMenuRoutes);
+app.use('/api/platform-settings', platformSettingsRoutes);
+app.use('/api/restaurants', restaurantRoutes);
 
 // Basic health check route
 app.get('/', (req, res) => {
