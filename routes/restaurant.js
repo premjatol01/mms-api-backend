@@ -10,7 +10,8 @@ const {
   createRestaurant,
   updateRestaurant,
   bulkUpdateStatus,
-  toggleStatus
+  toggleStatus,
+  sendInvite
 } = require('../controllers/restaurant');
 
 const storage = multer.diskStorage({
@@ -42,5 +43,8 @@ router.route('/:id')
 
 router.route('/:id/status')
   .patch(toggleStatus);
+
+router.route('/:id/send-invite')
+  .post(sendInvite);
 
 module.exports = router;

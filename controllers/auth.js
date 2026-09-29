@@ -109,8 +109,44 @@ const logoutUser = (req, res) => {
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 };
 
+const jwt = require('jsonwebtoken');
+
+// @desc    Setup password via invite token
+// @route   POST /api/auth/setup-password
+// @access  Public
+const setupPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({ success: false, message: 'Please provide token and new password' });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(password, salt);
+    user.status = 'active'; // Activate the account
+
+    await user.save();
+
+    res.status(200).json({ success: true, message: 'Password set successfully. You can now login.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: 'Invalid or expired token' });
+  }
+};
 module.exports = {
+  setupPassword,
   loginUser,
   registerSuperAdmin,
   logoutUser
 };
+
