@@ -1,4 +1,6 @@
 const Restaurant = require('../models/Restaurant');
+const User = require('../models/User');
+const bcrypt = require('bcryptjs');
 
 // @desc    Get all restaurants (with filters and pagination)
 // @route   GET /api/restaurants
@@ -87,11 +89,40 @@ exports.createRestaurant = async (req, res) => {
     if (typeof data.address === 'string') data.address = JSON.parse(data.address);
     if (typeof data.subscription === 'string') data.subscription = JSON.parse(data.subscription);
     
+    // 1. Validate Admin Email Uniqueness & Hash Password
+    if (data.admin && data.admin.email) {
+      const existingUser = await User.findOne({ email: data.admin.email });
+      if (existingUser) {
+        return res.status(400).json({ success: false, message: 'Admin email already exists' });
+      }
+
+      if (data.admin.password) {
+        const salt = await bcrypt.genSalt(10);
+        data.admin.password = await bcrypt.hash(data.admin.password, salt);
+      } else {
+        return res.status(400).json({ success: false, message: 'Admin password is required' });
+      }
+    } else {
+      return res.status(400).json({ success: false, message: 'Admin email is required' });
+    }
+
     if (req.file) {
       data.logo = `/uploads/restaurants/${req.file.filename}`;
     }
 
+    // 2. Create the Restaurant
     const restaurant = await Restaurant.create(data);
+
+    // 3. Create the corresponding User for Login
+    await User.create({
+      name: data.admin.name,
+      email: data.admin.email,
+      password: data.admin.password, // already hashed
+      phone: data.admin.phone,
+      role: 'restaurant_admin',
+      restaurantId: restaurant._id
+    });
+
     res.status(201).json({ success: true, data: restaurant });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
