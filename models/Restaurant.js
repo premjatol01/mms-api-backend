@@ -80,6 +80,11 @@ const restaurantSchema = new mongoose.Schema({
     isActive: Boolean,
     acceptOrders: Boolean,
     showOnPublicWebsite: Boolean
+  },
+
+  masterMenuSelection: {
+    categoryIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MasterCategory' }],
+    itemIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MasterItem' }]
   }
 }, { timestamps: true });
 

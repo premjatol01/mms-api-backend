@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth');
 const masterMenuRoutes = require('./routes/masterMenu');
 const platformSettingsRoutes = require('./routes/platformSettings');
 const restaurantRoutes = require('./routes/restaurant');
+const restaurantProfileRoutes = require('./routes/restaurantProfile');
 const leadRoutes = require('./routes/lead');
 const qrTemplateRoutes = require('./routes/qrTemplate');
 
@@ -40,6 +41,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/master-menu', masterMenuRoutes);
 app.use('/api/platform-settings', platformSettingsRoutes);
 app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/restaurant', restaurantProfileRoutes);
+app.use('/api/restaurant/tables', require('./routes/restaurantTables'));
 app.use('/api/leads', leadRoutes);
 app.use('/api/qr-templates', qrTemplateRoutes);
 

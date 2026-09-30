@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const menuCategorySchema = new mongoose.Schema({
   restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true },
+  masterCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'MasterCategory' },
   name: { type: String, required: true },
   description: { type: String },
   image: { type: String },
