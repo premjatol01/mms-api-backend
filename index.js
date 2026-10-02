@@ -43,6 +43,8 @@ app.use('/api/platform-settings', platformSettingsRoutes);
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/restaurant', restaurantProfileRoutes);
 app.use('/api/restaurant/tables', require('./routes/restaurantTables'));
+app.use('/api/menu', require('./routes/menu'));
+app.use('/api/design-requests', require('./routes/designRequests'));
 app.use('/api/leads', leadRoutes);
 app.use('/api/qr-templates', qrTemplateRoutes);
 
