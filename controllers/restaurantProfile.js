@@ -359,6 +359,27 @@ const syncMasterMenuSelection = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Check if a subdomain is available
+ * @route   GET /api/restaurant/subdomain/check?slug=...
+ * @access  Private (restaurant_admin)
+ */
+const checkSubdomain = async (req, res) => {
+  try {
+    const { slug } = req.query;
+    if (!slug) return res.status(400).json({ success: false, message: 'slug is required' });
+
+    const existing = await Restaurant.findOne({
+      'website.subdomain': slug,
+      _id: { $ne: req.user.restaurantId }
+    });
+
+    res.status(200).json({ success: true, data: { available: !existing } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -367,4 +388,5 @@ module.exports = {
   uploadCover,
   removeCover,
   syncMasterMenuSelection,
+  checkSubdomain,
 };

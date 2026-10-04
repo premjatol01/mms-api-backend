@@ -11,18 +11,22 @@ const {
   deleteTable,
   getQRCodes,
   generateQRCodes,
+  assignQRToTable,
+  regenerateAllQRCodes,
   deleteQRCode
 } = require('../controllers/restaurantTables');
 
 router.use(protect, roleGuard('restaurant_admin'));
 
-// ⚠️ IMPORTANT: Specific routes MUST come before parameterised routes
-// Otherwise Express matches /qr as /:id = "qr"
+// ⚠️ Specific routes MUST come before parameterised /:id routes
 
-// QR Code Routes (defined first — before /:id)
+// QR Code Routes
 router.route('/qr')
   .get(getQRCodes)
   .post(generateQRCodes);
+
+router.post('/qr/assign', assignQRToTable);          // Assign QR to table (regenerates image with real URL)
+router.post('/qr/regenerate-all', regenerateAllQRCodes); // Bulk regenerate all assigned QR images
 
 router.route('/qr/:id')
   .delete(deleteQRCode);

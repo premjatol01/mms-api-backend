@@ -13,6 +13,7 @@ const {
   uploadCover,
   removeCover,
   syncMasterMenuSelection,
+  checkSubdomain,
 } = require('../controllers/restaurantProfile');
 
 // All routes require a valid JWT and the restaurant_admin role
@@ -36,5 +37,8 @@ router.route('/profile/cover')
 // Menu Selection Sync
 router.route('/profile/menu-selection')
   .post(syncMasterMenuSelection);
+
+// Subdomain availability check
+router.get('/subdomain/check', checkSubdomain);
 
 module.exports = router;
