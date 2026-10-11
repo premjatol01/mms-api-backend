@@ -248,3 +248,43 @@ exports.sendInvite = async (req, res) => {
   }
 };
 
+// @desc    Get public restaurant portfolio by subdomain or ID
+// @route   GET /api/restaurants/portfolio/:subdomain
+// @access  Public
+exports.getRestaurantPortfolio = async (req, res) => {
+  try {
+    const { subdomain } = req.params;
+    if (!subdomain) {
+      return res.status(400).json({ success: false, message: 'Subdomain is required' });
+    }
+
+    const cleanSubdomain = subdomain.trim().toLowerCase();
+    const mongoose = require('mongoose');
+
+    // 1. Find by website.subdomain (case-insensitive)
+    let restaurant = await Restaurant.findOne({
+      'website.subdomain': { $regex: new RegExp(`^${cleanSubdomain}$`, 'i') }
+    }).select('-admin.password');
+
+    // 2. Fallback: If not found and param is a valid MongoDB ObjectId
+    if (!restaurant && mongoose.isValidObjectId(cleanSubdomain)) {
+      restaurant = await Restaurant.findById(cleanSubdomain).select('-admin.password');
+    }
+
+    if (!restaurant) {
+      return res.status(404).json({
+        success: false,
+        message: `Restaurant '${subdomain}' not found`
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: restaurant
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+

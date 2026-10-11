@@ -23,7 +23,17 @@ const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split('
 const path = require('path');
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.includes('localhost:') ||
+      (process.env.BASE_DOMAIN && origin.includes(process.env.BASE_DOMAIN.split(':')[0]))
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
   credentials: true // Important for sending cookies
 }));
 app.use(express.json());

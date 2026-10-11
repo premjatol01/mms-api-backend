@@ -7,6 +7,7 @@ const fs = require('fs');
 const {
   getRestaurants,
   getRestaurant,
+  getRestaurantPortfolio,
   createRestaurant,
   updateRestaurant,
   bulkUpdateStatus,
@@ -32,6 +33,13 @@ const upload = multer({ storage: storage });
 
 router.route('/bulk/status')
   .patch(bulkUpdateStatus);
+
+// Public Portfolio Routes (Must be before /:id)
+router.route('/portfolio/:subdomain')
+  .get(getRestaurantPortfolio);
+
+router.route('/by-subdomain/:subdomain')
+  .get(getRestaurantPortfolio);
 
 router.route('/')
   .get(getRestaurants)
