@@ -57,6 +57,7 @@ app.use('/api/menu', require('./routes/menu'));
 app.use('/api/design-requests', require('./routes/designRequests'));
 app.use('/api/leads', leadRoutes);
 app.use('/api/qr-templates', qrTemplateRoutes);
+app.use('/api/restaurant/website', require('./routes/website'));
 
 // Basic health check route
 app.get('/', (req, res) => {
