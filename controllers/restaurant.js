@@ -297,9 +297,28 @@ exports.getRestaurantPortfolio = async (req, res) => {
       });
     }
 
+    const restaurantData = restaurant.toObject ? restaurant.toObject() : { ...restaurant };
+    const rawColors = websiteConfig?.websiteColors?.toObject ? websiteConfig.websiteColors.toObject() : websiteConfig?.websiteColors;
+    restaurantData.websiteColors = {
+      primary: '#f29191',
+      secondary: '#b1e5e6',
+      background: '#ffffff',
+      text: '#1f2937',
+      ...(rawColors || {})
+    };
+    if (websiteConfig) {
+      restaurantData.websiteConfig = websiteConfig;
+    }
+
+    const WebsiteSection = require('../models/WebsiteSection');
+    const sections = await WebsiteSection.find({ restaurantId: restaurant._id, enabled: true }).sort({ order: 1 });
+    if (sections && sections.length > 0) {
+      restaurantData.sections = sections;
+    }
+
     res.status(200).json({
       success: true,
-      data: restaurant
+      data: restaurantData
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
