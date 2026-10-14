@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const Restaurant = require('../models/Restaurant');
+const WebsiteConfig = require('../models/WebsiteConfig');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -182,6 +183,24 @@ const updateProfile = async (req, res) => {
       { $set },
       { new: true, runValidators: true }
     );
+
+    const updatedSubdomain = body.website?.subdomain !== undefined ? body.website.subdomain : $set['website.subdomain'];
+    if (updatedSubdomain !== undefined) {
+      await WebsiteConfig.findOneAndUpdate(
+        { restaurantId: req.user.restaurantId },
+        { $set: { restaurantSlug: updatedSubdomain } },
+        { upsert: true }
+      );
+    }
+
+    const updatedStatus = body.website?.status !== undefined ? body.website.status : $set['website.status'];
+    if (updatedStatus !== undefined) {
+      await WebsiteConfig.findOneAndUpdate(
+        { restaurantId: req.user.restaurantId },
+        { $set: { websiteStatus: updatedStatus === 'published' ? 'published' : 'draft' } },
+        { upsert: true }
+      );
+    }
 
     res.status(200).json({ success: true, data: formatProfile(updated, req) });
   } catch (error) {

@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const websiteConfigSchema = new mongoose.Schema({
   restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true, unique: true },
   restaurantName: { type: String },
-  restaurantSlug: { type: String, unique: true },
+  restaurantSlug: { type: String, unique: true, sparse: true },
   baseDomain: { type: String },
   description: { type: String },
   phone: { type: String },

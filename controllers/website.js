@@ -158,6 +158,30 @@ exports.getWebsiteConfig = async (req, res) => {
           text: '#1f2937'
         }
       });
+    } else {
+      // Sync restaurantSlug and website.subdomain if there's any discrepancy
+      let configDirty = false;
+      const rSubdomain = restaurant.website?.subdomain || '';
+      const cSlug = config.restaurantSlug || '';
+
+      if (rSubdomain && cSlug !== rSubdomain) {
+        config.restaurantSlug = rSubdomain;
+        configDirty = true;
+      } else if (cSlug && !rSubdomain) {
+        restaurant.website = restaurant.website || {};
+        restaurant.website.subdomain = cSlug;
+        await restaurant.save();
+      }
+
+      // Also ensure websiteStatus is in sync
+      if (restaurant.website?.status && config.websiteStatus !== restaurant.website.status) {
+        config.websiteStatus = restaurant.website.status === 'published' ? 'published' : 'draft';
+        configDirty = true;
+      }
+
+      if (configDirty) {
+        await config.save();
+      }
     }
 
     // 2. Find or initialize WebsiteSections
@@ -194,10 +218,15 @@ exports.getWebsiteConfig = async (req, res) => {
       content: s.content
     }));
 
+    const configData = config.toObject ? config.toObject() : { ...config };
+    if (!configData.restaurantSlug && restaurant.website?.subdomain) {
+      configData.restaurantSlug = restaurant.website.subdomain;
+    }
+
     res.status(200).json({
       success: true,
       data: {
-        config,
+        config: configData,
         sections: formattedSections
       }
     });
@@ -235,7 +264,7 @@ exports.updateWebsiteConfig = async (req, res) => {
     const restaurantUpdates = {};
     if (restaurantName) restaurantUpdates.name = restaurantName;
     if (description) restaurantUpdates.shortDescription = description;
-    if (restaurantSlug) restaurantUpdates['website.subdomain'] = restaurantSlug;
+    if (restaurantSlug !== undefined) restaurantUpdates['website.subdomain'] = restaurantSlug;
     if (Object.keys(restaurantUpdates).length > 0) {
       await Restaurant.findByIdAndUpdate(restaurantId, { $set: restaurantUpdates });
     }
@@ -544,6 +573,10 @@ exports.submitPublicInquiry = async (req, res) => {
 
     if (!restaurant) {
       return res.status(404).json({ success: false, message: 'Restaurant not found' });
+    }
+
+    if (restaurant.website?.status !== 'published') {
+      return res.status(403).json({ success: false, message: 'Website is currently unpublished' });
     }
 
     const inquiry = await Inquiry.create({

@@ -278,6 +278,25 @@ exports.getRestaurantPortfolio = async (req, res) => {
       });
     }
 
+    // Check if website is published
+    const WebsiteConfig = require('../models/WebsiteConfig');
+    const websiteConfig = await WebsiteConfig.findOne({ restaurantId: restaurant._id });
+
+    const isRestaurantPublished = restaurant.website?.status === 'published';
+    const isConfigPublished = websiteConfig?.websiteStatus === 'published';
+
+    const isPublished = (isRestaurantPublished || isConfigPublished) &&
+      restaurant.website?.status !== 'draft' &&
+      websiteConfig?.websiteStatus !== 'draft';
+
+    if (!isPublished) {
+      return res.status(404).json({
+        success: false,
+        isUnpublished: true,
+        message: `Website for '${subdomain}' is currently unpublished`
+      });
+    }
+
     res.status(200).json({
       success: true,
       data: restaurant
