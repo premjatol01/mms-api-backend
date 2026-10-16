@@ -106,26 +106,38 @@ exports.getTables = async (req, res) => {
 
 exports.createTable = async (req, res) => {
   try {
-    const { tableId, status, qrCodeId } = req.body;
+    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId } = req.body;
+    const userLabel = (inputTableNo || inputTableId || '').trim();
 
-    const exists = await Table.findOne({ restaurantId: req.user.restaurantId, tableId: new RegExp(`^${tableId}$`, 'i') });
+    if (!userLabel) {
+      return res.status(400).json({ success: false, message: 'Table No. is required' });
+    }
+
+    const exists = await Table.findOne({
+      restaurantId: req.user.restaurantId,
+      $or: [
+        { tableNo: new RegExp(`^${userLabel}$`, 'i') },
+        { tableId: new RegExp(`^${userLabel}$`, 'i') }
+      ]
+    });
     if (exists) {
       return res.status(400).json({ success: false, message: 'Table No. already exists' });
     }
 
     const table = await Table.create({
       restaurantId: req.user.restaurantId,
-      tableId,
+      tableId: userLabel,
+      tableNo: userLabel,
       status: status || 'active',
       qrCodeId: qrCodeId || undefined
     });
 
     if (qrCodeId) {
       const qrDoc = await QrCode.findByIdAndUpdate(qrCodeId, { tableId: table._id, status: 'assigned' }, { new: true });
-      // Regenerate QR image with the real table URL
+      // Regenerate QR image with the MongoDB ID URL
       if (qrDoc) {
         const restaurant = await Restaurant.findById(req.user.restaurantId);
-        await regenerateQRImage(qrDoc, restaurant, tableId);
+        await regenerateQRImage(qrDoc, restaurant, table._id);
       }
     }
 
@@ -138,23 +150,26 @@ exports.createTable = async (req, res) => {
 
 exports.updateTable = async (req, res) => {
   try {
-    const { tableId, status, qrCodeId } = req.body;
+    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId } = req.body;
 
-    if (tableId) {
+    const table = await Table.findById(req.params.id);
+    if (!table) return res.status(404).json({ success: false, message: 'Table not found' });
+
+    const userLabel = (inputTableNo || inputTableId || '').trim();
+    if (userLabel) {
       const exists = await Table.findOne({
         restaurantId: req.user.restaurantId,
-        tableId: new RegExp(`^${tableId}$`, 'i'),
-        _id: { $ne: req.params.id }
+        _id: { $ne: req.params.id },
+        $or: [
+          { tableNo: new RegExp(`^${userLabel}$`, 'i') },
+          { tableId: new RegExp(`^${userLabel}$`, 'i') }
+        ]
       });
       if (exists) {
         return res.status(400).json({ success: false, message: 'Table No. already exists' });
       }
     }
 
-    const table = await Table.findById(req.params.id);
-    if (!table) return res.status(404).json({ success: false, message: 'Table not found' });
-
-    const newTableLabel = tableId || table.tableId;
     const restaurant = await Restaurant.findById(req.user.restaurantId);
 
     // Handle QR reassignment
@@ -165,19 +180,21 @@ exports.updateTable = async (req, res) => {
       if (qrCodeId) {
         const qrDoc = await QrCode.findByIdAndUpdate(qrCodeId, { tableId: table._id, status: 'assigned' }, { new: true });
         if (qrDoc) {
-          await regenerateQRImage(qrDoc, restaurant, newTableLabel);
+          await regenerateQRImage(qrDoc, restaurant, table._id);
         }
       }
-    } else if (table.qrCodeId && tableId && tableId !== table.tableId) {
-      // Table label changed but QR stays — regenerate with new label
+    } else if (table.qrCodeId) {
       const qrDoc = await QrCode.findById(table.qrCodeId);
-      if (qrDoc) {
-        await regenerateQRImage(qrDoc, restaurant, newTableLabel);
+      if (qrDoc && (!qrDoc.scanUrl || !qrDoc.scanUrl.includes(`/menu/${table._id}`))) {
+        await regenerateQRImage(qrDoc, restaurant, table._id);
       }
     }
 
     const payload = {};
-    if (tableId) payload.tableId = tableId;
+    if (userLabel) {
+      payload.tableNo = userLabel;
+      payload.tableId = userLabel;
+    }
     if (status) payload.status = status;
     if (qrCodeId !== undefined) payload.qrCodeId = qrCodeId || null;
 
@@ -300,7 +317,7 @@ exports.assignQRToTable = async (req, res) => {
     const restaurant = await Restaurant.findById(req.user.restaurantId);
     qrDoc.tableId = table._id;
     qrDoc.status = 'assigned';
-    await regenerateQRImage(qrDoc, restaurant, table.tableId);
+    await regenerateQRImage(qrDoc, restaurant, table._id);
 
     table.qrCodeId = qrDoc._id;
     await table.save();
@@ -331,7 +348,7 @@ exports.regenerateAllQRCodes = async (req, res) => {
     for (const table of tables) {
       const qrDoc = await QrCode.findById(table.qrCodeId);
       if (!qrDoc) continue;
-      await regenerateQRImage(qrDoc, restaurant, table.tableId);
+      await regenerateQRImage(qrDoc, restaurant, table._id);
       regenerated++;
     }
 

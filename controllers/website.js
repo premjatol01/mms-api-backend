@@ -1,8 +1,40 @@
+const path = require('path');
+const fs = require('fs');
 const mongoose = require('mongoose');
 const WebsiteConfig = require('../models/WebsiteConfig');
 const WebsiteSection = require('../models/WebsiteSection');
 const Inquiry = require('../models/Inquiry');
 const Restaurant = require('../models/Restaurant');
+
+/**
+ * Saves a base64 data URL to the public/uploads/website directory and returns the relative path.
+ * If the input is not a base64 data URL, it returns the input unchanged.
+ */
+const saveBase64Image = (dataUrl, restaurantId) => {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return dataUrl;
+  }
+  const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+  if (!matches || matches.length < 3) {
+    return dataUrl;
+  }
+  let ext = matches[1].toLowerCase();
+  if (ext === 'jpeg') ext = 'jpg';
+  if (ext === 'svg+xml') ext = 'svg';
+  const base64Data = matches[2];
+  const buffer = Buffer.from(base64Data, 'base64');
+
+  const uploadDir = path.join(__dirname, '../public/uploads/website');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const filename = `${restaurantId || 'web'}-${Date.now()}-${Math.round(Math.random() * 1e9)}.${ext}`;
+  const filePath = path.join(uploadDir, filename);
+  fs.writeFileSync(filePath, buffer);
+
+  return `/uploads/website/${filename}`;
+};
 
 // Standard 7 default sections in fixed order (Reordering is disabled)
 const DEFAULT_SECTIONS = [
@@ -369,10 +401,31 @@ exports.updateSection = async (req, res) => {
   try {
     const restaurantId = req.user.restaurantId;
     const { sectionId } = req.params;
-    const { content, title, description, enabled } = req.body;
+    let { content, title, description, enabled } = req.body;
 
     const updateFields = {};
-    if (content !== undefined) updateFields.content = content;
+    if (content !== undefined) {
+      if (content && typeof content === 'object') {
+        content = { ...content };
+        // Process gallery images array if present
+        if (Array.isArray(content.images)) {
+          content.images = content.images.map((img) => {
+            if (img && img.url && typeof img.url === 'string' && img.url.startsWith('data:image/')) {
+              return {
+                ...img,
+                url: saveBase64Image(img.url, restaurantId)
+              };
+            }
+            return img;
+          });
+        }
+        // Process hero / about single imageUrl if present
+        if (content.imageUrl && typeof content.imageUrl === 'string' && content.imageUrl.startsWith('data:image/')) {
+          content.imageUrl = saveBase64Image(content.imageUrl, restaurantId);
+        }
+      }
+      updateFields.content = content;
+    }
     if (title !== undefined) updateFields.title = title;
     if (description !== undefined) updateFields.description = description;
     if (enabled !== undefined) updateFields.enabled = enabled;

@@ -12,7 +12,8 @@ const {
   updateRestaurant,
   bulkUpdateStatus,
   toggleStatus,
-  sendInvite
+  sendInvite,
+  verifyTableSession
 } = require('../controllers/restaurant');
 
 const storage = multer.diskStorage({
@@ -33,6 +34,10 @@ const upload = multer({ storage: storage });
 
 router.route('/bulk/status')
   .patch(bulkUpdateStatus);
+
+// Public Table Verification (Must be before /:id)
+router.route('/verify-table/:subdomain/:tableId')
+  .get(verifyTableSession);
 
 // Public Portfolio Routes (Must be before /:id)
 router.route('/portfolio/:subdomain')

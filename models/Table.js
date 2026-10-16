@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const tableSchema = new mongoose.Schema({
   restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true },
-  tableId: { type: String, required: true },
+  tableId: { type: String },
+  tableNo: { type: String }, // User-configured table name/number (e.g. "Table 1")
   number: { type: Number },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' },
   qrCodeId: { type: mongoose.Schema.Types.ObjectId, ref: 'QrCode', default: null }

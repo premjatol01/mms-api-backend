@@ -312,8 +312,44 @@ exports.getRestaurantPortfolio = async (req, res) => {
 
     const WebsiteSection = require('../models/WebsiteSection');
     const sections = await WebsiteSection.find({ restaurantId: restaurant._id, enabled: true }).sort({ order: 1 });
-    if (sections && sections.length > 0) {
-      restaurantData.sections = sections;
+    restaurantData.sections = sections || [];
+
+    // If 'menu' section is enabled, populate popular items
+    const menuSec = sections.find((s) => s.sectionId === 'menu' || s.type === 'menu');
+    if (menuSec) {
+      const MenuItem = require('../models/MenuItem');
+      let popularItems = await MenuItem.find({
+        restaurantId: restaurant._id,
+        status: 'available',
+        $or: [{ isPopular: true }, { isBestseller: true }]
+      }).limit(8);
+
+      if (popularItems.length < 4) {
+        const extra = await MenuItem.find({
+          restaurantId: restaurant._id,
+          status: 'available',
+          _id: { $nin: popularItems.map((i) => i._id) }
+        }).limit(8 - popularItems.length);
+        popularItems = [...popularItems, ...extra];
+      }
+      restaurantData.popularItems = popularItems;
+    }
+
+    // If 'offers' section is enabled, populate active offers
+    const offersSec = sections.find((s) => s.sectionId === 'offers' || s.type === 'offers');
+    if (offersSec) {
+      const Offer = require('../models/Offer');
+      const now = new Date();
+      const activeOffers = await Offer.find({
+        restaurantId: restaurant._id,
+        status: 'active',
+        $or: [
+          { 'validity.endDate': { $exists: false } },
+          { 'validity.endDate': null },
+          { 'validity.endDate': { $gte: now } }
+        ]
+      }).sort({ createdAt: -1 }).limit(6);
+      restaurantData.activeOffers = activeOffers;
     }
 
     res.status(200).json({
@@ -324,5 +360,119 @@ exports.getRestaurantPortfolio = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// @desc    Verify restaurant subdomain and tableId for public ordering portal
+// @route   GET /api/restaurants/verify-table/:subdomain/:tableId
+// @access  Public
+exports.verifyTableSession = async (req, res) => {
+  try {
+    const { subdomain, tableId } = req.params;
+
+    if (!subdomain || !subdomain.trim()) {
+      return res.status(400).json({
+        success: false,
+        errorType: 'MISSING_SUBDOMAIN',
+        message: 'Subdomain is required.'
+      });
+    }
+
+    if (!tableId || !tableId.trim()) {
+      return res.status(400).json({
+        success: false,
+        errorType: 'MISSING_TABLE_ID',
+        message: 'Table ID is required.'
+      });
+    }
+
+    const cleanSubdomain = decodeURIComponent(subdomain).trim().toLowerCase();
+    const cleanTableId = decodeURIComponent(tableId).trim();
+    const mongoose = require('mongoose');
+
+    // 1. Verify Restaurant by subdomain (or ObjectId fallback)
+    let restaurant = await Restaurant.findOne({
+      'website.subdomain': { $regex: new RegExp(`^${cleanSubdomain}$`, 'i') }
+    }).select('-admin.password');
+
+    if (!restaurant && mongoose.isValidObjectId(cleanSubdomain)) {
+      restaurant = await Restaurant.findById(cleanSubdomain).select('-admin.password');
+    }
+
+    if (!restaurant) {
+      return res.status(404).json({
+        success: false,
+        errorType: 'RESTAURANT_NOT_FOUND',
+        message: `Restaurant '${subdomain}' not found. Please verify the URL or scan a valid table QR code.`
+      });
+    }
+
+    // 2. Check if restaurant is active
+    if (restaurant.status && restaurant.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        errorType: 'RESTAURANT_INACTIVE',
+        message: `Restaurant '${restaurant.name}' is currently inactive and not accepting orders.`
+      });
+    }
+
+    // 3. Find Table for this specific restaurant
+    const Table = require('../models/Table');
+    let table = await Table.findOne({
+      restaurantId: restaurant._id,
+      $or: [
+        ...(mongoose.isValidObjectId(cleanTableId) ? [{ _id: cleanTableId }] : []),
+        { tableNo: cleanTableId },
+        { tableNo: { $regex: new RegExp(`^${cleanTableId}$`, 'i') } },
+        { tableId: cleanTableId }
+      ]
+    });
+
+    if (!table) {
+      return res.status(404).json({
+        success: false,
+        errorType: 'TABLE_NOT_FOUND',
+        message: `Table '${cleanTableId}' was not found for ${restaurant.name}. Please scan the QR code located on your table.`
+      });
+    }
+
+    // 4. Check Table status
+    if (table.status && table.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        errorType: 'TABLE_INACTIVE',
+        message: `Table ${table.tableNo || table.tableId} is currently inactive and not accepting orders. Please speak with a restaurant staff member.`
+      });
+    }
+
+    // Return verified data
+    return res.status(200).json({
+      success: true,
+      data: {
+        restaurant: {
+          id: restaurant._id,
+          name: restaurant.name,
+          logo: restaurant.logo,
+          coverImage: restaurant.coverImage,
+          subdomain: restaurant.website?.subdomain,
+          status: restaurant.status,
+          currency: '₹'
+        },
+        table: {
+          id: table._id,
+          tableId: table._id.toString(),
+          tableNo: table.tableNo || table.tableId,
+          status: table.status
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error verifying table session:', error);
+    return res.status(500).json({
+      success: false,
+      errorType: 'SERVER_ERROR',
+      message: 'Failed to verify table session. Please try again.'
+    });
+  }
+};
+
 
 

@@ -36,12 +36,12 @@ app.use(cors({
   },
   credentials: true // Important for sending cookies
 }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 // Only parse urlencoded bodies for non-multipart requests so multer handles file upload streams directly
 app.use((req, res, next) => {
   const contentType = req.headers['content-type'] || '';
   if (contentType.includes('multipart/form-data')) return next();
-  return express.urlencoded({ extended: true })(req, res, next);
+  return express.urlencoded({ extended: true, limit: '50mb' })(req, res, next);
 });
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -51,13 +51,15 @@ app.use('/api/auth', authRoutes);
 app.use('/api/master-menu', masterMenuRoutes);
 app.use('/api/platform-settings', platformSettingsRoutes);
 app.use('/api/restaurants', restaurantRoutes);
-app.use('/api/restaurant', restaurantProfileRoutes);
+app.use('/api/restaurant/website', require('./routes/website'));
 app.use('/api/restaurant/tables', require('./routes/restaurantTables'));
+app.use('/api/restaurant', restaurantProfileRoutes);
 app.use('/api/menu', require('./routes/menu'));
 app.use('/api/design-requests', require('./routes/designRequests'));
 app.use('/api/leads', leadRoutes);
 app.use('/api/qr-templates', qrTemplateRoutes);
-app.use('/api/restaurant/website', require('./routes/website'));
+app.use('/api/offers', require('./routes/offers'));
+app.use('/api/public/offers', require('./routes/publicOffers'));
 
 // Basic health check route
 app.get('/', (req, res) => {
