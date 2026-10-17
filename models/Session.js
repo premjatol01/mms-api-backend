@@ -13,6 +13,7 @@ const sessionSchema = new mongoose.Schema({
   orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Order' }],
   subtotal: { type: Number, default: 0 },
   discount: { type: Number, default: 0 },
+  gst: { type: Number, default: 0 },
   total: { type: Number, default: 0 },
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
   customerMobile: { type: String, default: null },

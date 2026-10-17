@@ -61,6 +61,7 @@ app.use('/api/qr-templates', qrTemplateRoutes);
 app.use('/api/offers', require('./routes/offers'));
 app.use('/api/public/offers', require('./routes/publicOffers'));
 app.use('/api/orders', require('./routes/orders'));
+app.use('/api/reviews', require('./routes/reviews'));
 
 // Basic health check route
 app.get('/', (req, res) => {

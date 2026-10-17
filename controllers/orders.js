@@ -87,16 +87,21 @@ function recalcOrderDoc(order) {
   return order;
 }
 
-async function recalcSessionDoc(sessionId) {
-  const session = await Session.findById(sessionId);
+async function recalcSessionDoc(sessionId, dbSession = null) {
+  const query = Session.findById(sessionId);
+  if (dbSession) query.session(dbSession);
+  const session = await query;
   if (!session) return null;
 
-  const orders = await Order.find({ sessionId: session._id });
+  const ordersQuery = Order.find({ sessionId: session._id });
+  if (dbSession) ordersQuery.session(dbSession);
+  const orders = await ordersQuery;
   const liveOrders = orders.filter((o) => o.status !== 'cancelled');
 
   const subtotal = liveOrders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
   const discount = liveOrders.reduce((sum, o) => sum + (o.discount || 0), 0);
-  const total = liveOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  const gst = Math.round(subtotal * 0.05);
+  const total = Math.max(0, subtotal + gst - discount);
 
   const orderWithOffer = liveOrders.find((o) => o.appliedOffer);
   if (orderWithOffer && !session.appliedOffer) {
@@ -105,9 +110,14 @@ async function recalcSessionDoc(sessionId) {
 
   session.subtotal = subtotal;
   session.discount = discount > 0 ? discount : (session.discount || 0);
+  session.gst = gst;
   session.total = total;
   session.orderIds = orders.map((o) => o._id);
-  await session.save();
+  if (dbSession) {
+    await session.save({ session: dbSession });
+  } else {
+    await session.save();
+  }
   return session;
 }
 
@@ -225,6 +235,7 @@ exports.getPublicTableSession = async (req, res) => {
               paymentStatus: activeSession.paymentStatus,
               subtotal: activeSession.subtotal,
               discount: activeSession.discount,
+              gst: activeSession.gst ?? Math.round((activeSession.subtotal || 0) * 0.05),
               total: activeSession.total,
               customerMobile: activeSession.customerMobile,
               customerName: activeSession.customerName || null,
@@ -282,6 +293,7 @@ exports.placePublicOrder = async (req, res) => {
         orderIds: [],
         total: 0,
         subtotal: 0,
+        gst: 0,
         discount: 0,
         startedAt: new Date()
       });
@@ -577,7 +589,7 @@ exports.getAdminOrders = async (req, res) => {
 
     const orders = await Order.find(query)
       .populate('tableId', 'tableNo tableId number')
-      .populate('sessionId', 'sessionNumber status paymentStatus total customerMobile')
+      .populate('sessionId', 'sessionNumber status paymentStatus subtotal discount gst total customerMobile')
       .sort({ createdAt: -1 });
 
     return res.status(200).json({ success: true, count: orders.length, data: orders });
@@ -658,6 +670,10 @@ exports.createAdminManualOrder = async (req, res) => {
         customerMobile: cleanCustomerMobile || null,
         customerName: customer?.name ? String(customer.name).trim() : null,
         orderIds: [],
+        subtotal: 0,
+        discount: 0,
+        gst: 0,
+        total: 0,
         startedAt: new Date()
       });
       await session.save();
@@ -943,18 +959,49 @@ exports.serveAllInSession = async (req, res) => {
   }
 };
 
+function isTransactionSupported() {
+  const topology = mongoose.connection.client?.topology?.description;
+  if (!topology) return false;
+  return Boolean(topology.setName) || topology.type === 'ReplicaSetWithPrimary' || topology.type === 'Sharded';
+}
+
 // @route   POST /api/orders/sessions/:sessionId/pay
 // @desc    Mark session as paid & complete the session (frees the table)
+//          Guarantees Atomicity, Consistency, Isolation, Durability (ACID)
 // @access  Protected
 exports.markSessionPaid = async (req, res) => {
+  const canUseTx = isTransactionSupported();
+  let dbSession = null;
+  if (canUseTx) {
+    try {
+      dbSession = await mongoose.startSession();
+      dbSession.startTransaction();
+    } catch (err) {
+      console.warn('Could not initialize MongoDB transaction:', err.message);
+      dbSession = null;
+    }
+  }
+
   try {
-    const session = await Session.findOne({ _id: req.params.sessionId, restaurantId: req.user.restaurantId });
-    if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
+    const sessionQuery = Session.findOne({
+      _id: req.params.sessionId,
+      restaurantId: req.user.restaurantId
+    });
+    if (dbSession) sessionQuery.session(dbSession);
+    const session = await sessionQuery;
+
+    if (!session) {
+      if (dbSession) await dbSession.abortTransaction();
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
     if (session.status === 'completed') {
+      if (dbSession) await dbSession.abortTransaction();
       return res.status(400).json({ success: false, message: 'Session is already completed' });
     }
 
-    const orders = await Order.find({ sessionId: session._id });
+    const ordersQuery = Order.find({ sessionId: session._id });
+    if (dbSession) ordersQuery.session(dbSession);
+    const orders = await ordersQuery;
 
     // Check unresolved items
     const unresolved = [];
@@ -967,53 +1014,104 @@ exports.markSessionPaid = async (req, res) => {
     });
 
     if (unresolved.length > 0 && req.body.force !== true) {
+      if (dbSession) await dbSession.abortTransaction();
       return res.status(400).json({
         success: false,
         reason: 'unresolved',
-        message: 'Some items are still Pending or Under Process. Mark them served or cancelled before payment.',
+        message: 'Some items have not been verified as delivered to the table yet. Please confirm delivery status or cancel items before payment.',
         unresolved
       });
     }
 
-    await recalcSessionDoc(session._id);
-    const refreshed = await Session.findById(session._id);
+    // Atomically ensure all remaining active order items are marked as served
+    for (const order of orders) {
+      let orderModified = false;
+      order.items.forEach((item) => {
+        if (!isItemCancelled(item) && item.status !== 'served') {
+          item.status = 'served';
+          orderModified = true;
+        }
+      });
+      if (orderModified || (order.status !== 'served' && order.status !== 'cancelled')) {
+        recalcOrderDoc(order);
+        if (dbSession) {
+          await order.save({ session: dbSession });
+        } else {
+          await order.save();
+        }
+      }
+    }
+
+    // Recalculate bill amounts strictly following: subtotal + 5% GST - discount
+    const liveOrders = orders.filter((o) => o.status !== 'cancelled');
+    const subtotal = liveOrders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
+    const discount = liveOrders.reduce((sum, o) => sum + (o.discount || 0), 0);
+    const gst = Math.round(subtotal * 0.05);
+    const total = Math.max(0, subtotal + gst - discount);
 
     const now = new Date();
-    refreshed.status = 'completed';
-    refreshed.paymentStatus = refreshed.total > 0 ? 'successful' : 'not_required';
-    refreshed.paidAt = now;
-    refreshed.closedAt = now;
-    await refreshed.save();
+    session.subtotal = subtotal;
+    session.discount = discount > 0 ? discount : (session.discount || 0);
+    session.gst = gst;
+    session.total = total;
+    session.status = 'completed';
+    session.paymentStatus = total > 0 ? 'successful' : 'not_required';
+    session.paidAt = now;
+    session.closedAt = now;
+    session.orderIds = orders.map((o) => o._id);
 
-    // Accumulate customer spend in Customer collection
-    if (refreshed.customerMobile) {
-      await Customer.findOneAndUpdate(
-        { restaurantId: refreshed.restaurantId, mobile: refreshed.customerMobile },
+    if (dbSession) {
+      await session.save({ session: dbSession });
+    } else {
+      await session.save();
+    }
+
+    // Atomically update customer activity and spend in Customer collection
+    if (session.customerMobile) {
+      const cleanMobile = String(session.customerMobile).replace(/\D/g, '').slice(-10);
+      const custQuery = Customer.findOneAndUpdate(
+        { restaurantId: session.restaurantId, mobile: cleanMobile },
         {
-          $inc: { totalSpend: Math.max(0, refreshed.total || 0) },
+          $inc: { totalSpend: Math.max(0, session.total || 0) },
           $set: { lastVisitAt: now }
         }
-      ).catch((err) => console.error('Error updating customer spend on session paid:', err));
+      );
+      if (dbSession) custQuery.session(dbSession);
+      await custQuery;
+    }
+
+    // Commit transaction guaranteeing Atomicity, Consistency, Isolation, Durability
+    if (dbSession) {
+      await dbSession.commitTransaction();
     }
 
     // Broadcast session:completed to both restaurant admin and customer table
-    emitToRestaurant(refreshed.restaurantId, 'session:completed', {
-      session: refreshed,
-      tableId: refreshed.tableId
+    emitToRestaurant(session.restaurantId, 'session:completed', {
+      session,
+      tableId: session.tableId
     });
 
-    emitToTable(refreshed.tableId, 'session:completed', {
-      session: refreshed,
-      tableId: refreshed.tableId
+    emitToTable(session.tableId, 'session:completed', {
+      session,
+      tableId: session.tableId
     });
 
     return res.status(200).json({
       success: true,
       message: 'Payment recorded and session completed successfully. Table is now free!',
-      data: refreshed
+      data: session
     });
   } catch (error) {
+    if (useTransaction) {
+      try {
+        await dbSession.abortTransaction();
+      } catch (abortErr) {
+        console.error('Error aborting transaction:', abortErr);
+      }
+    }
     console.error('Error marking session as paid:', error);
     return res.status(500).json({ success: false, message: error.message });
+  } finally {
+    await dbSession.endSession();
   }
 };
