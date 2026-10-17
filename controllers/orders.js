@@ -59,6 +59,44 @@ async function upsertCustomerForRestaurant({ restaurantId, mobile, name = '', se
   }
 }
 
+/**
+ * Synchronizes session favorites and customer profile favorites (union merge)
+ * Loads saved favorites from customer visits into the active session,
+ * and records newly favorited dishes to the customer's permanent profile.
+ */
+async function syncSessionAndCustomerFavorites(session, customer) {
+  if (!session || !customer) return session?.favorites || [];
+
+  const sessionFavs = new Set((session.favorites || []).map(String));
+  const customerFavs = new Set((customer.favorites || []).map(String));
+
+  const merged = Array.from(new Set([...sessionFavs, ...customerFavs]));
+
+  let sessionChanged = false;
+  let customerChanged = false;
+
+  const currentSessionFavs = (session.favorites || []).map(String);
+  if (merged.length !== currentSessionFavs.length || !merged.every((id, idx) => currentSessionFavs[idx] === id)) {
+    session.favorites = merged;
+    sessionChanged = true;
+  }
+
+  const currentCustFavs = (customer.favorites || []).map(String);
+  if (merged.length !== currentCustFavs.length || !merged.every((id, idx) => currentCustFavs[idx] === id)) {
+    customer.favorites = merged;
+    customerChanged = true;
+  }
+
+  if (sessionChanged) {
+    await session.save();
+  }
+  if (customerChanged) {
+    await customer.save();
+  }
+
+  return merged;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure calculation helpers (aligned with admin & customer portal expectations)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +245,15 @@ exports.getPublicTableSession = async (req, res) => {
 
     let orders = [];
     if (activeSession) {
+      if (activeSession.customerMobile) {
+        const cleanMobile = String(activeSession.customerMobile).replace(/\D/g, '').slice(-10);
+        if (cleanMobile.length === 10) {
+          const customer = await Customer.findOne({ restaurantId: restaurant._id, mobile: cleanMobile });
+          if (customer) {
+            await syncSessionAndCustomerFavorites(activeSession, customer);
+          }
+        }
+      }
       orders = await Order.find({ sessionId: activeSession._id }).sort({ createdAt: 1 });
     }
 
@@ -241,6 +288,7 @@ exports.getPublicTableSession = async (req, res) => {
               customerName: activeSession.customerName || null,
               customerId: activeSession.customerId || null,
               appliedOffer: activeSession.appliedOffer || (orders.find((o) => o.appliedOffer)?.appliedOffer) || null,
+              favorites: activeSession.favorites || [],
               startedAt: activeSession.startedAt
             }
           : null,
@@ -315,6 +363,7 @@ exports.placePublicOrder = async (req, res) => {
         await session.save();
       }
       if (customer) {
+        await syncSessionAndCustomerFavorites(session, customer);
         customer.lastOrderAt = new Date();
         await customer.save().catch(() => {});
       }
@@ -481,7 +530,12 @@ exports.syncCustomerToSession = async (req, res) => {
       spend: 0
     });
 
-    // 2. Link customer & offer to Session
+    // 2. Synchronize favorites between session and customer profile
+    if (customer) {
+      await syncSessionAndCustomerFavorites(session, customer);
+    }
+
+    // 3. Link customer & offer to Session
     session.customerMobile = cleanMobile;
     if (customer) {
       session.customerId = customer._id;
@@ -497,7 +551,7 @@ exports.syncCustomerToSession = async (req, res) => {
     }
     await session.save();
 
-    // 3. Retroactively sync customer mobile onto all orders in this session
+    // 4. Retroactively sync customer mobile onto all orders in this session
     await Order.updateMany(
       { sessionId: session._id, $or: [{ 'customer.mobile': null }, { 'customer.mobile': '' }] },
       {
@@ -509,7 +563,7 @@ exports.syncCustomerToSession = async (req, res) => {
       }
     );
 
-    // 4. Real-time broadcast to table and restaurant admin
+    // 5. Real-time broadcast to table and restaurant admin
     if (table) {
       emitToTable(table._id, 'session:customer_synced', {
         tableId: table._id,
@@ -517,7 +571,13 @@ exports.syncCustomerToSession = async (req, res) => {
         customerMobile: cleanMobile,
         customerName: session.customerName,
         appliedOffer: session.appliedOffer || null,
-        discount: session.discount || 0
+        discount: session.discount || 0,
+        favorites: session.favorites || []
+      });
+
+      emitToTable(table._id, 'session:favorites_updated', {
+        sessionId: session._id,
+        favorites: session.favorites || []
       });
     }
 
@@ -540,6 +600,7 @@ exports.syncCustomerToSession = async (req, res) => {
         customerName: session.customerName,
         appliedOffer: session.appliedOffer || null,
         discount: session.discount || 0,
+        favorites: session.favorites || [],
         customer: customer
           ? {
               id: customer._id,
@@ -554,6 +615,148 @@ exports.syncCustomerToSession = async (req, res) => {
     });
   } catch (error) {
     console.error('Error syncing customer to session:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @route   POST /api/orders/public/session/favorite
+// @desc    Toggle favorite item for the active table session and linked customer
+// @access  Public
+exports.toggleSessionFavorite = async (req, res) => {
+  try {
+    const { subdomain, tableId, sessionId, itemId } = req.body;
+
+    if (!itemId) {
+      return res.status(400).json({ success: false, message: 'Item ID is required' });
+    }
+
+    const cleanItemId = String(itemId).trim();
+    let restaurant = null;
+    let table = null;
+
+    if (subdomain && tableId) {
+      const resolved = await resolveRestaurantAndTable(subdomain, tableId);
+      if (!resolved.error) {
+        restaurant = resolved.restaurant;
+        table = resolved.table;
+      }
+    }
+
+    let session = null;
+    if (sessionId && mongoose.isValidObjectId(sessionId)) {
+      session = await Session.findById(sessionId);
+      if (session) {
+        if (!restaurant) restaurant = await Restaurant.findById(session.restaurantId);
+        if (!table) table = await Table.findById(session.tableId);
+      }
+    }
+
+    if (!session && restaurant && table) {
+      session = await Session.findOne({
+        restaurantId: restaurant._id,
+        tableId: table._id,
+        status: 'active'
+      });
+    }
+
+    // If no active session exists yet for this table, create one!
+    if (!session && restaurant && table) {
+      const sessionNumber = await getNextSessionNumber(restaurant._id);
+      session = new Session({
+        restaurantId: restaurant._id,
+        tableId: table._id,
+        sessionNumber,
+        status: 'active',
+        paymentStatus: 'pending',
+        customerMobile: null,
+        orderIds: [],
+        total: 0,
+        subtotal: 0,
+        discount: 0,
+        gst: 0,
+        favorites: [cleanItemId],
+        startedAt: new Date()
+      });
+      await session.save();
+
+      // Emit to table room so any other customers scanning this QR code sync instantly
+      emitToTable(table._id, 'session:favorites_updated', {
+        sessionId: session._id,
+        favorites: session.favorites,
+        itemId: cleanItemId,
+        isFavorite: true
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          sessionId: session._id,
+          favorites: session.favorites,
+          isFavorite: true
+        }
+      });
+    }
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Could not find or create an active table session.'
+      });
+    }
+
+    // Toggle cleanItemId in session.favorites
+    const currentFavorites = (session.favorites || []).map(String);
+    const isCurrentlyFav = currentFavorites.includes(cleanItemId);
+    let updatedFavorites = [];
+    let isFavorite = false;
+
+    if (isCurrentlyFav) {
+      updatedFavorites = currentFavorites.filter((id) => id !== cleanItemId);
+      isFavorite = false;
+    } else {
+      updatedFavorites = [...currentFavorites, cleanItemId];
+      isFavorite = true;
+    }
+
+    session.favorites = updatedFavorites;
+    await session.save();
+
+    // If customer mobile is associated with the session, update Customer.favorites in DB
+    if (session.customerMobile) {
+      const cleanMobile = String(session.customerMobile).replace(/\D/g, '').slice(-10);
+      if (cleanMobile.length === 10) {
+        if (isFavorite) {
+          await Customer.updateOne(
+            { restaurantId: session.restaurantId, mobile: cleanMobile },
+            { $addToSet: { favorites: cleanItemId } }
+          );
+        } else {
+          await Customer.updateOne(
+            { restaurantId: session.restaurantId, mobile: cleanMobile },
+            { $pull: { favorites: cleanItemId } }
+          );
+        }
+      }
+    }
+
+    // Real-time broadcast to all customers at this table
+    emitToTable(session.tableId, 'session:favorites_updated', {
+      sessionId: session._id,
+      favorites: session.favorites,
+      itemId: cleanItemId,
+      isFavorite
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        sessionId: session._id,
+        favorites: session.favorites,
+        isFavorite
+      }
+    });
+  } catch (error) {
+    console.error('Error toggling session favorite:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -1102,7 +1305,7 @@ exports.markSessionPaid = async (req, res) => {
       data: session
     });
   } catch (error) {
-    if (useTransaction) {
+    if (dbSession) {
       try {
         await dbSession.abortTransaction();
       } catch (abortErr) {
@@ -1112,6 +1315,8 @@ exports.markSessionPaid = async (req, res) => {
     console.error('Error marking session as paid:', error);
     return res.status(500).json({ success: false, message: error.message });
   } finally {
-    await dbSession.endSession();
+    if (dbSession) {
+      await dbSession.endSession();
+    }
   }
 };

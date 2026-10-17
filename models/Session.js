@@ -19,6 +19,7 @@ const sessionSchema = new mongoose.Schema({
   customerMobile: { type: String, default: null },
   customerName: { type: String, default: null },
   appliedOffer: { type: Object, default: null },
+  favorites: [{ type: String, default: [] }],
   startedAt: { type: Date, default: Date.now },
   closedAt: { type: Date, default: null },
   paidAt: { type: Date, default: null }

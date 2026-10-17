@@ -446,6 +446,7 @@ exports.verifyTableSession = async (req, res) => {
     // 5. Find active session for this table
     const Session = require('../models/Session');
     const Order = require('../models/Order');
+    const Customer = require('../models/Customer');
 
     const activeSession = await Session.findOne({
       restaurantId: restaurant._id,
@@ -455,6 +456,27 @@ exports.verifyTableSession = async (req, res) => {
 
     let sessionOrders = [];
     if (activeSession) {
+      if (activeSession.customerMobile) {
+        const cleanMobile = String(activeSession.customerMobile).replace(/\D/g, '').slice(-10);
+        if (cleanMobile.length === 10) {
+          const customer = await Customer.findOne({ restaurantId: restaurant._id, mobile: cleanMobile });
+          if (customer) {
+            const sessionFavs = new Set((activeSession.favorites || []).map(String));
+            const customerFavs = new Set((customer.favorites || []).map(String));
+            const merged = Array.from(new Set([...sessionFavs, ...customerFavs]));
+            const currSession = activeSession.favorites || [];
+            if (merged.length !== currSession.length || !merged.every((id, idx) => currSession[idx] === id)) {
+              activeSession.favorites = merged;
+              await activeSession.save();
+            }
+            const currCust = customer.favorites || [];
+            if (merged.length !== currCust.length || !merged.every((id, idx) => currCust[idx] === id)) {
+              customer.favorites = merged;
+              await customer.save();
+            }
+          }
+        }
+      }
       sessionOrders = await Order.find({ sessionId: activeSession._id }).sort({ createdAt: 1 });
     }
 
@@ -487,11 +509,13 @@ exports.verifyTableSession = async (req, res) => {
           paymentStatus: activeSession.paymentStatus,
           subtotal: activeSession.subtotal,
           discount: activeSession.discount,
+          gst: activeSession.gst ?? Math.round((activeSession.subtotal || 0) * 0.05),
           total: activeSession.total,
           customerMobile: activeSession.customerMobile,
           customerName: activeSession.customerName || null,
           customerId: activeSession.customerId || null,
           appliedOffer: activeSession.appliedOffer || (sessionOrders.find((o) => o.appliedOffer)?.appliedOffer) || null,
+          favorites: activeSession.favorites || [],
           startedAt: activeSession.startedAt
         } : null,
         orders: sessionOrders

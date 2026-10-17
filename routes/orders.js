@@ -5,6 +5,7 @@ const {
   getPublicTableSession,
   placePublicOrder,
   syncCustomerToSession,
+  toggleSessionFavorite,
   getAdminOrders,
   getAdminSessions,
   createAdminManualOrder,
@@ -19,6 +20,7 @@ const {
 router.get('/public/session/:subdomain/:tableId', getPublicTableSession);
 router.post('/public/place-order', placePublicOrder);
 router.post('/public/session/sync-customer', syncCustomerToSession);
+router.post('/public/session/favorite', toggleSessionFavorite);
 
 // ─── Protected routes (Restaurant Admin) ──────────────────────────────────
 router.use(protect);

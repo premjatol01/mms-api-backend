@@ -54,7 +54,11 @@ const customerSchema = new mongoose.Schema({
   notes: {
     type: String,
     default: ''
-  }
+  },
+  favorites: [{
+    type: String,
+    default: []
+  }]
 }, { timestamps: true });
 
 // Ensure customer is unique per restaurant
