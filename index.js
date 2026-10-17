@@ -60,14 +60,22 @@ app.use('/api/leads', leadRoutes);
 app.use('/api/qr-templates', qrTemplateRoutes);
 app.use('/api/offers', require('./routes/offers'));
 app.use('/api/public/offers', require('./routes/publicOffers'));
+app.use('/api/orders', require('./routes/orders'));
 
 // Basic health check route
 app.get('/', (req, res) => {
   res.status(200).json({ message: 'Tablly API is running...' });
 });
 
+// Create HTTP server and initialize Socket.io
+const http = require('http');
+const { initSocket } = require('./socket');
+const server = http.createServer(app);
+initSocket(server);
+
 // Start Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });
+

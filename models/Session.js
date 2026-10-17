@@ -11,10 +11,16 @@ const sessionSchema = new mongoose.Schema({
     default: 'pending'
   },
   orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Order' }],
+  subtotal: { type: Number, default: 0 },
+  discount: { type: Number, default: 0 },
   total: { type: Number, default: 0 },
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
+  customerMobile: { type: String, default: null },
+  customerName: { type: String, default: null },
+  appliedOffer: { type: Object, default: null },
   startedAt: { type: Date, default: Date.now },
   closedAt: { type: Date, default: null },
   paidAt: { type: Date, default: null }
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Session', sessionSchema);

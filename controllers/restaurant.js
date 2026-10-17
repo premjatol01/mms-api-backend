@@ -443,6 +443,21 @@ exports.verifyTableSession = async (req, res) => {
       });
     }
 
+    // 5. Find active session for this table
+    const Session = require('../models/Session');
+    const Order = require('../models/Order');
+
+    const activeSession = await Session.findOne({
+      restaurantId: restaurant._id,
+      tableId: table._id,
+      status: 'active'
+    });
+
+    let sessionOrders = [];
+    if (activeSession) {
+      sessionOrders = await Order.find({ sessionId: activeSession._id }).sort({ createdAt: 1 });
+    }
+
     // Return verified data
     return res.status(200).json({
       success: true,
@@ -458,10 +473,28 @@ exports.verifyTableSession = async (req, res) => {
         },
         table: {
           id: table._id,
+          _id: table._id,
           tableId: table._id.toString(),
           tableNo: table.tableNo || table.tableId,
+          tableName: table.tableNo || table.tableId || (table.number ? `Table ${table.number}` : "Table"),
+          name: table.tableNo || table.tableId || (table.number ? `Table ${table.number}` : "Table"),
           status: table.status
-        }
+        },
+        session: activeSession ? {
+          _id: activeSession._id,
+          sessionNumber: activeSession.sessionNumber,
+          status: activeSession.status,
+          paymentStatus: activeSession.paymentStatus,
+          subtotal: activeSession.subtotal,
+          discount: activeSession.discount,
+          total: activeSession.total,
+          customerMobile: activeSession.customerMobile,
+          customerName: activeSession.customerName || null,
+          customerId: activeSession.customerId || null,
+          appliedOffer: activeSession.appliedOffer || (sessionOrders.find((o) => o.appliedOffer)?.appliedOffer) || null,
+          startedAt: activeSession.startedAt
+        } : null,
+        orders: sessionOrders
       }
     });
   } catch (error) {

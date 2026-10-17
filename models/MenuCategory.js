@@ -8,6 +8,7 @@ const menuCategorySchema = new mongoose.Schema({
   image: { type: String },
   itemCount: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+  isTopCategory: { type: Boolean, default: false },
   displayOrder: { type: Number, default: 0 }
 }, { timestamps: true });
 

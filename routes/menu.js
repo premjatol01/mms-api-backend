@@ -7,6 +7,7 @@ const {
   getCategories,
   createCategory,
   updateCategory,
+  setTopCategories,
   deleteCategory,
   getItems,
   createItem,
@@ -15,13 +16,17 @@ const {
   getCombos,
   createCombo,
   updateCombo,
-  deleteCombo
+  deleteCombo,
+  getPublicMenu
 } = require('../controllers/menu');
 
 const { createUploader } = require('../middleware/upload');
 const menuUploader = createUploader('menu');
 
-// All menu routes require the user to be a restaurant admin
+// Public route for customer order portal (no auth required)
+router.get('/public/:subdomain', getPublicMenu);
+
+// All admin menu routes require the user to be a restaurant admin
 router.use(protect, roleGuard('restaurant_admin'));
 
 // Upload Image
@@ -36,6 +41,8 @@ router.post('/upload-image', menuUploader.single('image'), (req, res) => {
 router.route('/categories')
   .get(getCategories)
   .post(createCategory);
+
+router.put('/categories/top-categories', setTopCategories);
 
 router.route('/categories/:id')
   .put(updateCategory)
