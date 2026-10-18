@@ -355,25 +355,103 @@ exports.getRestaurantPortfolio = async (req, res) => {
     restaurantData.sections = sections || [];
     restaurantData.footer = footerSec?.content || null;
 
-    // If 'menu' section is enabled, populate popular items
+    // If 'menu' section is enabled, populate popular categories and top 10 items per category
     const menuSec = sections.find((s) => s.sectionId === 'menu' || s.type === 'menu');
     if (menuSec) {
+      const MenuCategory = require('../models/MenuCategory');
       const MenuItem = require('../models/MenuItem');
-      let popularItems = await MenuItem.find({
-        restaurantId: restaurant._id,
-        status: 'available',
-        $or: [{ isPopular: true }, { isBestseller: true }]
-      }).limit(8);
+      const content = menuSec.content || {};
 
-      if (popularItems.length < 4) {
-        const extra = await MenuItem.find({
-          restaurantId: restaurant._id,
-          status: 'available',
-          _id: { $nin: popularItems.map((i) => i._id) }
-        }).limit(8 - popularItems.length);
-        popularItems = [...popularItems, ...extra];
+      let topCategoryIds = [];
+      if (Array.isArray(content.categoryIds) && content.categoryIds.length > 0) {
+        topCategoryIds = content.categoryIds.slice(0, 5);
+      } else if (Array.isArray(content.categoryConfigs) && content.categoryConfigs.length > 0) {
+        topCategoryIds = content.categoryConfigs.map((c) => c.categoryId).filter(Boolean).slice(0, 5);
       }
-      restaurantData.popularItems = popularItems;
+
+      let categories = [];
+      if (topCategoryIds.length > 0) {
+        const fetchedCats = await MenuCategory.find({
+          _id: { $in: topCategoryIds },
+          restaurantId: restaurant._id,
+          status: 'active'
+        });
+        categories = topCategoryIds
+          .map((id) => fetchedCats.find((c) => c._id.toString() === id.toString()))
+          .filter(Boolean);
+      }
+
+      // If no categories configured in section, fallback to categories marked isTopCategory: true
+      if (categories.length === 0) {
+        categories = await MenuCategory.find({
+          restaurantId: restaurant._id,
+          status: 'active',
+          isTopCategory: true
+        }).sort({ displayOrder: 1, createdAt: 1 }).limit(5);
+      }
+
+      // If still none, fallback to first 5 active categories
+      if (categories.length === 0) {
+        categories = await MenuCategory.find({
+          restaurantId: restaurant._id,
+          status: 'active'
+        }).sort({ displayOrder: 1, createdAt: 1 }).limit(5);
+      }
+
+      const categoryItemMap = content.categoryItemMap || {};
+      const categoryConfigs = content.categoryConfigs || [];
+      const popularCategories = [];
+      const allCategoryItems = [];
+
+      for (const cat of categories) {
+        const catIdStr = cat._id.toString();
+        let configuredItemIds = categoryItemMap[catIdStr] ||
+          categoryConfigs.find((c) => c.categoryId?.toString() === catIdStr)?.itemIds || [];
+
+        let items = [];
+        if (Array.isArray(configuredItemIds) && configuredItemIds.length > 0) {
+          const configuredItems = await MenuItem.find({
+            _id: { $in: configuredItemIds.slice(0, 10) },
+            restaurantId: restaurant._id,
+            status: 'available'
+          });
+          items = configuredItemIds
+            .slice(0, 10)
+            .map((id) => configuredItems.find((i) => i._id.toString() === id.toString()))
+            .filter(Boolean);
+        }
+
+        // If no configured items or empty list, fetch top items in this category (prioritize popular/bestseller)
+        if (items.length === 0) {
+          items = await MenuItem.find({
+            restaurantId: restaurant._id,
+            categoryId: cat._id,
+            status: 'available'
+          }).sort({ isPopular: -1, isBestseller: -1, createdAt: 1 }).limit(10);
+        }
+
+        popularCategories.push({
+          _id: cat._id,
+          id: cat._id,
+          name: cat.name,
+          description: cat.description || '',
+          image: cat.image || '',
+          items: items
+        });
+
+        items.forEach((item) => allCategoryItems.push(item));
+      }
+
+      restaurantData.popularCategories = popularCategories;
+
+      if (allCategoryItems.length > 0) {
+        restaurantData.popularItems = allCategoryItems;
+      } else {
+        restaurantData.popularItems = await MenuItem.find({
+          restaurantId: restaurant._id,
+          status: 'available'
+        }).sort({ isPopular: -1, isBestseller: -1 }).limit(8);
+      }
     }
 
     // If 'offers' section is enabled, populate active offers

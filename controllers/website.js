@@ -78,6 +78,9 @@ const DEFAULT_SECTIONS = [
       description: 'Our most loved dishes, picked by our guests',
       showViewAll: true,
       viewAllLabel: 'View All Menu',
+      categoryIds: [],
+      categoryItemMap: {},
+      categoryConfigs: [],
       colors: {
         background: '#ffffff',
         accent: '#2a7c13'
@@ -551,6 +554,25 @@ exports.updateSection = async (req, res) => {
       }
       if (Object.keys(socialUpdates).length > 0) {
         await Restaurant.findByIdAndUpdate(restaurantId, { $set: socialUpdates });
+      }
+    }
+
+    if (sectionId === 'menu' && content && typeof content === 'object') {
+      if (Array.isArray(content.categoryIds) && content.categoryIds.length > 0) {
+        const MenuCategory = require('../models/MenuCategory');
+        const catIds = content.categoryIds.slice(0, 5);
+        // Reset top categories for restaurant
+        await MenuCategory.updateMany(
+          { restaurantId },
+          { $set: { isTopCategory: false } }
+        );
+        // Set isTopCategory for selected categories
+        for (let i = 0; i < catIds.length; i++) {
+          await MenuCategory.updateOne(
+            { restaurantId, _id: catIds[i] },
+            { $set: { isTopCategory: true, displayOrder: i + 1 } }
+          );
+        }
       }
     }
 
