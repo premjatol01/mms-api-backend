@@ -311,8 +311,49 @@ exports.getRestaurantPortfolio = async (req, res) => {
     }
 
     const WebsiteSection = require('../models/WebsiteSection');
-    const sections = await WebsiteSection.find({ restaurantId: restaurant._id, enabled: true }).sort({ order: 1 });
+    let sections = await WebsiteSection.find({ restaurantId: restaurant._id, enabled: true }).sort({ order: 1 });
+
+    // Check if footer is present in enabled sections
+    let footerSec = sections.find((s) => s.sectionId === 'footer' || s.type === 'footer');
+    if (!footerSec) {
+      // Check if footer exists in DB and was explicitly disabled
+      const dbFooter = await WebsiteSection.findOne({ restaurantId: restaurant._id, sectionId: 'footer' });
+      if (!dbFooter) {
+        // Not yet created in DB, provide default enabled footer
+        footerSec = {
+          sectionId: 'footer',
+          type: 'footer',
+          title: 'Footer',
+          enabled: true,
+          order: 8,
+          content: {
+            title: restaurant.name || '',
+            subtitle: restaurant.tagline || 'Authentic Indian Flavors',
+            description: restaurant.shortDescription || restaurant.description || '',
+            socialLinks: {
+              instagram: restaurant.socialLinks?.instagram || '',
+              facebook: restaurant.socialLinks?.facebook || '',
+              twitter: restaurant.socialLinks?.twitter || '',
+              youtube: restaurant.socialLinks?.youtube || '',
+              linkedin: restaurant.socialLinks?.linkedin || '',
+              whatsapp: restaurant.socialLinks?.whatsapp || restaurant.contact?.whatsapp || ''
+            },
+            sectionLinks: [
+              { id: 'hero', label: 'Home', href: '#hero', enabled: true },
+              { id: 'about', label: 'About Us', href: '#about', enabled: true },
+              { id: 'menu', label: 'Menu', href: '#menu', enabled: true },
+              { id: 'offers', label: 'Offers', href: '#offers', enabled: true },
+              { id: 'gallery', label: 'Gallery', href: '#gallery', enabled: true },
+              { id: 'map', label: 'Location', href: '#map', enabled: true },
+              { id: 'inquiry', label: 'Contact', href: '#inquiry', enabled: true }
+            ]
+          }
+        };
+        sections = [...sections, footerSec];
+      }
+    }
     restaurantData.sections = sections || [];
+    restaurantData.footer = footerSec?.content || null;
 
     // If 'menu' section is enabled, populate popular items
     const menuSec = sections.find((s) => s.sectionId === 'menu' || s.type === 'menu');

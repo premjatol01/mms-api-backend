@@ -18,7 +18,9 @@ const {
   getInquiries,
   getInquiryStats,
   updateInquiryStatus,
-  submitPublicInquiry
+  submitPublicInquiry,
+  getFooterConfig,
+  updateFooterConfig
 } = require('../controllers/website');
 
 // Image upload storage for website builder
@@ -63,6 +65,11 @@ router.route('/sections/:sectionId')
   .put(updateSection);
 
 router.patch('/sections/:sectionId/toggle', toggleSection);
+
+// Website Footer (Dedicated API)
+router.route('/footer')
+  .get(getFooterConfig)
+  .put(updateFooterConfig);
 
 // Image Upload
 router.post('/upload', upload.single('image'), (req, res) => {

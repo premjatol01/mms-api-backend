@@ -153,6 +153,36 @@ const DEFAULT_SECTIONS = [
       },
       purposeOptions: ['General Inquiry', 'Table Reservation', 'Private Event', 'Feedback']
     }
+  },
+  {
+    sectionId: 'footer',
+    type: 'footer',
+    title: 'Footer',
+    description: 'Footer info, section links, and social media',
+    enabled: true,
+    order: 8,
+    content: {
+      title: 'Restaurant Name',
+      subtitle: 'Authentic Indian Flavors',
+      description: 'Serving delicious food crafted with passion and fresh ingredients.',
+      socialLinks: {
+        instagram: '',
+        facebook: '',
+        twitter: '',
+        youtube: '',
+        linkedin: '',
+        whatsapp: ''
+      },
+      sectionLinks: [
+        { id: 'hero', label: 'Home', href: '#hero', enabled: true },
+        { id: 'about', label: 'About Us', href: '#about', enabled: true },
+        { id: 'menu', label: 'Menu', href: '#menu', enabled: true },
+        { id: 'offers', label: 'Offers', href: '#offers', enabled: true },
+        { id: 'gallery', label: 'Gallery', href: '#gallery', enabled: true },
+        { id: 'map', label: 'Location', href: '#map', enabled: true },
+        { id: 'inquiry', label: 'Contact', href: '#inquiry', enabled: true }
+      ]
+    }
   }
 ];
 
@@ -222,8 +252,21 @@ exports.getWebsiteConfig = async (req, res) => {
       const sectionsToCreate = DEFAULT_SECTIONS.map((s) => ({
         ...s,
         restaurantId,
-        // pre-fill map location if restaurant address exists
-        content: s.sectionId === 'map' ? {
+        content: s.sectionId === 'footer' ? {
+          ...s.content,
+          title: restaurant.name || s.content.title,
+          subtitle: restaurant.tagline || s.content.subtitle || '',
+          description: restaurant.shortDescription || restaurant.description || s.content.description,
+          socialLinks: {
+            ...s.content.socialLinks,
+            instagram: restaurant.socialLinks?.instagram || '',
+            facebook: restaurant.socialLinks?.facebook || '',
+            twitter: restaurant.socialLinks?.twitter || '',
+            youtube: restaurant.socialLinks?.youtube || '',
+            linkedin: restaurant.socialLinks?.linkedin || '',
+            whatsapp: restaurant.socialLinks?.whatsapp || restaurant.contact?.whatsapp || ''
+          }
+        } : s.sectionId === 'map' ? {
           ...s.content,
           location: {
             ...s.content.location,
@@ -236,6 +279,34 @@ exports.getWebsiteConfig = async (req, res) => {
       }));
 
       sections = await WebsiteSection.insertMany(sectionsToCreate);
+    } else {
+      const hasFooter = sections.some((s) => s.sectionId === 'footer');
+      if (!hasFooter) {
+        const defaultFooter = DEFAULT_SECTIONS.find((s) => s.sectionId === 'footer');
+        if (defaultFooter) {
+          const footerDoc = await WebsiteSection.create({
+            ...defaultFooter,
+            restaurantId,
+            content: {
+              ...defaultFooter.content,
+              title: restaurant.name || defaultFooter.content.title,
+              subtitle: restaurant.tagline || defaultFooter.content.subtitle || '',
+              description: restaurant.shortDescription || restaurant.description || defaultFooter.content.description,
+              socialLinks: {
+                ...defaultFooter.content.socialLinks,
+                instagram: restaurant.socialLinks?.instagram || '',
+                facebook: restaurant.socialLinks?.facebook || '',
+                twitter: restaurant.socialLinks?.twitter || '',
+                youtube: restaurant.socialLinks?.youtube || '',
+                linkedin: restaurant.socialLinks?.linkedin || '',
+                whatsapp: restaurant.socialLinks?.whatsapp || restaurant.contact?.whatsapp || ''
+              }
+            }
+          });
+          sections.push(footerDoc);
+          sections.sort((a, b) => a.order - b.order);
+        }
+      }
     }
 
     // Normalize sections format so frontend receives `id` matching `sectionId`
@@ -373,7 +444,36 @@ exports.unpublishWebsite = async (req, res) => {
 exports.getSections = async (req, res) => {
   try {
     const restaurantId = req.user.restaurantId;
-    const sections = await WebsiteSection.find({ restaurantId }).sort({ order: 1 });
+    let sections = await WebsiteSection.find({ restaurantId }).sort({ order: 1 });
+
+    const hasFooter = sections.some((s) => s.sectionId === 'footer');
+    if (!hasFooter && sections.length > 0) {
+      const restaurant = await Restaurant.findById(restaurantId);
+      const defaultFooter = DEFAULT_SECTIONS.find((s) => s.sectionId === 'footer');
+      if (defaultFooter) {
+        const footerDoc = await WebsiteSection.create({
+          ...defaultFooter,
+          restaurantId,
+          content: {
+            ...defaultFooter.content,
+            title: restaurant?.name || defaultFooter.content.title,
+            subtitle: restaurant?.tagline || defaultFooter.content.subtitle || '',
+            description: restaurant?.shortDescription || restaurant?.description || defaultFooter.content.description,
+            socialLinks: {
+              ...defaultFooter.content.socialLinks,
+              instagram: restaurant?.socialLinks?.instagram || '',
+              facebook: restaurant?.socialLinks?.facebook || '',
+              twitter: restaurant?.socialLinks?.twitter || '',
+              youtube: restaurant?.socialLinks?.youtube || '',
+              linkedin: restaurant?.socialLinks?.linkedin || '',
+              whatsapp: restaurant?.socialLinks?.whatsapp || restaurant?.contact?.whatsapp || ''
+            }
+          }
+        });
+        sections.push(footerDoc);
+        sections.sort((a, b) => a.order - b.order);
+      }
+    }
 
     const formatted = sections.map((s) => ({
       id: s.sectionId,
@@ -435,6 +535,24 @@ exports.updateSection = async (req, res) => {
       { $set: updateFields },
       { new: true, upsert: true }
     );
+
+    if (sectionId === 'footer' && content && typeof content === 'object') {
+      const socialUpdates = {};
+      if (content.subtitle) socialUpdates.tagline = content.subtitle;
+      if (content.socialLinks) {
+        if (content.socialLinks.instagram !== undefined) socialUpdates['socialLinks.instagram'] = content.socialLinks.instagram;
+        if (content.socialLinks.facebook !== undefined) socialUpdates['socialLinks.facebook'] = content.socialLinks.facebook;
+        if (content.socialLinks.twitter !== undefined) socialUpdates['socialLinks.twitter'] = content.socialLinks.twitter;
+        if (content.socialLinks.youtube !== undefined) socialUpdates['socialLinks.youtube'] = content.socialLinks.youtube;
+        if (content.socialLinks.whatsapp !== undefined) {
+          socialUpdates['socialLinks.whatsapp'] = content.socialLinks.whatsapp;
+          socialUpdates['contact.whatsapp'] = content.socialLinks.whatsapp;
+        }
+      }
+      if (Object.keys(socialUpdates).length > 0) {
+        await Restaurant.findByIdAndUpdate(restaurantId, { $set: socialUpdates });
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -651,3 +769,137 @@ exports.submitPublicInquiry = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * @desc    Get website footer configuration
+ * @route   GET /api/restaurant/website/footer
+ * @access  Private (restaurant_admin)
+ */
+exports.getFooterConfig = async (req, res) => {
+  try {
+    const restaurantId = req.user.restaurantId;
+    const restaurant = await Restaurant.findById(restaurantId);
+
+    if (!restaurant) {
+      return res.status(404).json({ success: false, message: 'Restaurant not found' });
+    }
+
+    let footer = await WebsiteSection.findOne({ restaurantId, sectionId: 'footer' });
+    if (!footer) {
+      const defaultFooter = DEFAULT_SECTIONS.find((s) => s.sectionId === 'footer');
+      footer = await WebsiteSection.create({
+        ...defaultFooter,
+        restaurantId,
+        content: {
+          ...defaultFooter.content,
+          title: restaurant.name || defaultFooter.content.title,
+          subtitle: restaurant.tagline || defaultFooter.content.subtitle || '',
+          description: restaurant.shortDescription || restaurant.description || defaultFooter.content.description,
+          socialLinks: {
+            ...defaultFooter.content.socialLinks,
+            instagram: restaurant.socialLinks?.instagram || '',
+            facebook: restaurant.socialLinks?.facebook || '',
+            twitter: restaurant.socialLinks?.twitter || '',
+            youtube: restaurant.socialLinks?.youtube || '',
+            linkedin: restaurant.socialLinks?.linkedin || '',
+            whatsapp: restaurant.socialLinks?.whatsapp || restaurant.contact?.whatsapp || ''
+          }
+        }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        id: footer.sectionId,
+        _id: footer._id,
+        type: footer.type,
+        title: footer.title,
+        description: footer.description,
+        enabled: footer.enabled,
+        order: footer.order,
+        content: footer.content
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Update website footer configuration
+ * @route   PUT /api/restaurant/website/footer
+ * @access  Private (restaurant_admin)
+ */
+exports.updateFooterConfig = async (req, res) => {
+  try {
+    const restaurantId = req.user.restaurantId;
+    const { title, subtitle, description, socialLinks, sectionLinks, enabled, content } = req.body;
+
+    let footer = await WebsiteSection.findOne({ restaurantId, sectionId: 'footer' });
+    const defaultFooter = DEFAULT_SECTIONS.find((s) => s.sectionId === 'footer');
+
+    const existingContent = footer?.content || defaultFooter.content;
+    const newContent = {
+      ...existingContent,
+      ...(content || {}),
+    };
+
+    if (title !== undefined) newContent.title = title;
+    if (subtitle !== undefined) newContent.subtitle = subtitle;
+    if (description !== undefined) newContent.description = description;
+    if (socialLinks !== undefined) newContent.socialLinks = { ...existingContent.socialLinks, ...socialLinks };
+    if (sectionLinks !== undefined) newContent.sectionLinks = sectionLinks;
+
+    const newEnabled = enabled !== undefined ? enabled : (footer ? footer.enabled : true);
+
+    footer = await WebsiteSection.findOneAndUpdate(
+      { restaurantId, sectionId: 'footer' },
+      {
+        $set: {
+          type: 'footer',
+          title: 'Footer',
+          description: 'Footer info, section links, and social media',
+          order: 8,
+          enabled: newEnabled,
+          content: newContent
+        }
+      },
+      { new: true, upsert: true }
+    );
+
+    // Sync social links to Restaurant model if provided
+    if (newContent.socialLinks) {
+      const socialUpdates = {};
+      if (newContent.socialLinks.instagram !== undefined) socialUpdates['socialLinks.instagram'] = newContent.socialLinks.instagram;
+      if (newContent.socialLinks.facebook !== undefined) socialUpdates['socialLinks.facebook'] = newContent.socialLinks.facebook;
+      if (newContent.socialLinks.twitter !== undefined) socialUpdates['socialLinks.twitter'] = newContent.socialLinks.twitter;
+      if (newContent.socialLinks.youtube !== undefined) socialUpdates['socialLinks.youtube'] = newContent.socialLinks.youtube;
+      if (newContent.socialLinks.whatsapp !== undefined) {
+        socialUpdates['socialLinks.whatsapp'] = newContent.socialLinks.whatsapp;
+        socialUpdates['contact.whatsapp'] = newContent.socialLinks.whatsapp;
+      }
+      if (Object.keys(socialUpdates).length > 0) {
+        await Restaurant.findByIdAndUpdate(restaurantId, { $set: socialUpdates });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Footer updated successfully',
+      data: {
+        id: footer.sectionId,
+        _id: footer._id,
+        type: footer.type,
+        title: footer.title,
+        description: footer.description,
+        enabled: footer.enabled,
+        order: footer.order,
+        content: footer.content
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
