@@ -14,6 +14,8 @@ const userSchema = new mongoose.Schema({
   mobile: { type: String },
   mobileVerified: { type: Boolean, default: false },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+  resetPasswordToken: { type: String },
+  resetPasswordExpire: { type: Date },
   lastLoginAt: { type: Date }
 }, { timestamps: true });
 

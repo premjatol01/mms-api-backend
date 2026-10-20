@@ -113,12 +113,24 @@ const DEFAULT_SECTIONS = [
     }
   },
   {
+    sectionId: 'reviews',
+    type: 'reviews',
+    title: 'Customer Reviews',
+    description: 'Guest ratings and feedback reviews',
+    enabled: true,
+    order: 6,
+    content: {
+      title: 'Customer Reviews',
+      description: 'What our guests say about their dining experience'
+    }
+  },
+  {
     sectionId: 'map',
     type: 'map',
     title: 'Map & Location',
     description: 'Google Maps and restaurant address',
     enabled: true,
-    order: 6,
+    order: 7,
     content: {
       title: 'Find Us',
       description: 'Visit us for lunch or dinner. We would love to see you.',
@@ -143,7 +155,7 @@ const DEFAULT_SECTIONS = [
     title: 'Contact / Inquiry',
     description: 'Customer inquiry form',
     enabled: true,
-    order: 7,
+    order: 8,
     content: {
       title: 'Contact Us',
       description: 'Have a question? Send us an inquiry.',
@@ -163,7 +175,7 @@ const DEFAULT_SECTIONS = [
     title: 'Footer',
     description: 'Footer info, section links, and social media',
     enabled: true,
-    order: 8,
+    order: 9,
     content: {
       title: 'Restaurant Name',
       subtitle: 'Authentic Indian Flavors',
@@ -182,6 +194,7 @@ const DEFAULT_SECTIONS = [
         { id: 'menu', label: 'Menu', href: '#menu', enabled: true },
         { id: 'offers', label: 'Offers', href: '#offers', enabled: true },
         { id: 'gallery', label: 'Gallery', href: '#gallery', enabled: true },
+        { id: 'reviews', label: 'Reviews', href: '#reviews', enabled: true },
         { id: 'map', label: 'Location', href: '#map', enabled: true },
         { id: 'inquiry', label: 'Contact', href: '#inquiry', enabled: true }
       ]
@@ -307,6 +320,19 @@ exports.getWebsiteConfig = async (req, res) => {
             }
           });
           sections.push(footerDoc);
+          sections.sort((a, b) => a.order - b.order);
+        }
+      }
+
+      const hasReviews = sections.some((s) => s.sectionId === 'reviews');
+      if (!hasReviews) {
+        const defaultReviews = DEFAULT_SECTIONS.find((s) => s.sectionId === 'reviews');
+        if (defaultReviews) {
+          const reviewsDoc = await WebsiteSection.create({
+            ...defaultReviews,
+            restaurantId
+          });
+          sections.push(reviewsDoc);
           sections.sort((a, b) => a.order - b.order);
         }
       }
@@ -474,6 +500,19 @@ exports.getSections = async (req, res) => {
           }
         });
         sections.push(footerDoc);
+        sections.sort((a, b) => a.order - b.order);
+      }
+    }
+
+    const hasReviews = sections.some((s) => s.sectionId === 'reviews');
+    if (!hasReviews && sections.length > 0) {
+      const defaultReviews = DEFAULT_SECTIONS.find((s) => s.sectionId === 'reviews');
+      if (defaultReviews) {
+        const reviewsDoc = await WebsiteSection.create({
+          ...defaultReviews,
+          restaurantId
+        });
+        sections.push(reviewsDoc);
         sections.sort((a, b) => a.order - b.order);
       }
     }

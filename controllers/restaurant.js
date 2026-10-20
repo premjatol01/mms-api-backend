@@ -352,6 +352,29 @@ exports.getRestaurantPortfolio = async (req, res) => {
         sections = [...sections, footerSec];
       }
     }
+
+    // Check if reviews is present in enabled sections
+    let reviewsSec = sections.find((s) => s.sectionId === 'reviews' || s.type === 'reviews');
+    if (!reviewsSec) {
+      // Check if reviews exists in DB and was explicitly disabled
+      const dbReviews = await WebsiteSection.findOne({ restaurantId: restaurant._id, sectionId: 'reviews' });
+      if (!dbReviews) {
+        reviewsSec = {
+          sectionId: 'reviews',
+          type: 'reviews',
+          title: 'Customer Reviews',
+          enabled: true,
+          order: 6,
+          content: {
+            title: 'Customer Reviews',
+            description: 'What our guests say about their dining experience'
+          }
+        };
+        sections = [...sections, reviewsSec];
+        sections.sort((a, b) => a.order - b.order);
+      }
+    }
+
     restaurantData.sections = sections || [];
     restaurantData.footer = footerSec?.content || null;
 
@@ -469,6 +492,44 @@ exports.getRestaurantPortfolio = async (req, res) => {
         ]
       }).sort({ createdAt: -1 }).limit(6);
       restaurantData.activeOffers = activeOffers;
+    }
+
+    // If 'reviews' section is enabled, populate public customer reviews and aggregate rating stats
+    if (reviewsSec) {
+      const CustomerReview = require('../models/CustomerReview');
+      const reviews = await CustomerReview.find({
+        restaurantId: restaurant._id,
+        status: { $ne: 'rejected' }
+      })
+        .sort({ submittedAt: -1 })
+        .limit(20);
+
+      const allStats = await CustomerReview.aggregate([
+        { $match: { restaurantId: restaurant._id, status: { $ne: 'rejected' } } },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: '$rating' },
+            totalReviews: { $sum: 1 }
+          }
+        }
+      ]);
+
+      restaurantData.reviews = reviews.map((r) => ({
+        id: r._id.toString(),
+        _id: r._id.toString(),
+        name: r.customerName || (r.customerMobile ? `User ${r.customerMobile.slice(-4)}` : 'Guest'),
+        rating: r.rating,
+        comment: r.comment || '',
+        status: r.status,
+        tableName: r.tableName || '',
+        createdAt: r.submittedAt ? r.submittedAt.toISOString() : (r.createdAt ? r.createdAt.toISOString() : new Date().toISOString())
+      }));
+
+      restaurantData.reviewStats = {
+        averageRating: allStats[0]?.averageRating ? Number(allStats[0].averageRating.toFixed(1)) : 0,
+        totalReviews: allStats[0]?.totalReviews || 0
+      };
     }
 
     res.status(200).json({
