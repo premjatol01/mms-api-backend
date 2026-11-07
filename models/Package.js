@@ -3,14 +3,18 @@ const mongoose = require('mongoose');
 const packageSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, required: true },
-  duration: {
-    type: String,
-    enum: ['30_days', '3_months', '6_months', '1_year'],
-    required: true
-  },
-  durationDisplay: { type: String },
-  durationDays: { type: Number },
+  maxTables: { type: Number, default: 15 },
   features: [{ type: String }],
+  pricing: [
+    {
+      duration: { type: String, required: true },
+      durationDays: { type: Number, required: true },
+      durationDisplay: { type: String, required: true },
+      price: { type: Number, required: true },
+      isPopular: { type: Boolean, default: false }
+    }
+  ],
+  price: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' }
 }, { timestamps: true });
 

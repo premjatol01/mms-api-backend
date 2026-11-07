@@ -62,6 +62,7 @@ app.use('/api/offers', require('./routes/offers'));
 app.use('/api/public/offers', require('./routes/publicOffers'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/reviews', require('./routes/reviews'));
+app.use('/api/packages', require('./routes/packages'));
 
 // Basic health check route
 app.get('/', (req, res) => {
@@ -79,4 +80,3 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });
-

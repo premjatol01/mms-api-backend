@@ -19,6 +19,9 @@ const restaurantSchema = new mongoose.Schema({
   subscription: {
     packageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Package' },
     packageName: { type: String },
+    duration: { type: String },
+    durationDisplay: { type: String },
+    price: { type: Number },
     status: { type: String, enum: ['active', 'expired', 'pending'], default: 'pending' },
     startDate: { type: Date },
     endDate: { type: Date }

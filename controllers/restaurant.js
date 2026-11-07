@@ -1,4 +1,5 @@
 const Restaurant = require('../models/Restaurant');
+const Package = require('../models/Package');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const sendEmail = require('../utils/sendEmail');
@@ -90,8 +91,16 @@ exports.createRestaurant = async (req, res) => {
     if (typeof data.admin === 'string') data.admin = JSON.parse(data.admin);
     if (typeof data.address === 'string') data.address = JSON.parse(data.address);
     if (typeof data.subscription === 'string') data.subscription = JSON.parse(data.subscription);
+    if (data.subscription && (data.subscription.package || data.subscription.packageName)) {
+      const pName = data.subscription.packageName || data.subscription.package;
+      const pkgDoc = await Package.findOne({ name: new RegExp('^' + pName + '$', 'i') });
+      if (pkgDoc) {
+        data.subscription.packageId = pkgDoc._id;
+        data.subscription.packageName = pkgDoc.name;
+      }
+    }
     
-    // 1. Validate Admin Email Uniqueness & Generate Temp Password
+// 1. Validate Admin Email Uniqueness & Generate Temp Password
     let tempHashedPassword;
     if (data.admin && data.admin.email) {
       const existingUser = await User.findOne({ email: data.admin.email });
@@ -141,6 +150,14 @@ exports.updateRestaurant = async (req, res) => {
     if (typeof data.admin === 'string') data.admin = JSON.parse(data.admin);
     if (typeof data.address === 'string') data.address = JSON.parse(data.address);
     if (typeof data.subscription === 'string') data.subscription = JSON.parse(data.subscription);
+    if (data.subscription && (data.subscription.package || data.subscription.packageName)) {
+      const pName = data.subscription.packageName || data.subscription.package;
+      const pkgDoc = await Package.findOne({ name: new RegExp('^' + pName + '$', 'i') });
+      if (pkgDoc) {
+        data.subscription.packageId = pkgDoc._id;
+        data.subscription.packageName = pkgDoc.name;
+      }
+    }
     
     if (req.file) {
       data.logo = `/uploads/restaurants/${req.file.filename}`;
@@ -710,6 +727,3 @@ exports.verifyTableSession = async (req, res) => {
     });
   }
 };
-
-
-
