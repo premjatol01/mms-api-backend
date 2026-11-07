@@ -188,7 +188,7 @@ const updateProfile = async (req, res) => {
     if (updatedSubdomain !== undefined) {
       await WebsiteConfig.findOneAndUpdate(
         { restaurantId: req.user.restaurantId },
-        { $set: { restaurantSlug: updatedSubdomain } },
+        { $set: { restaurantSlug: (updatedSubdomain || '').trim().toLowerCase(), ...(updatedSubdomain ? {} : { websiteStatus: 'draft' }) } },
         { upsert: true }
       );
     }
@@ -286,6 +286,18 @@ const uploadCover = async (req, res) => {
     restaurant.coverImage = coverPath;
     await restaurant.save();
 
+    // Reflect cover banner into website Hero Section
+    try {
+      const WebsiteSection = require('../models/WebsiteSection');
+      const fullCoverUrl = buildUrl(req, coverPath);
+      await WebsiteSection.findOneAndUpdate(
+        { restaurantId: restaurant._id, sectionId: 'hero' },
+        { $set: { 'content.imageUrl': fullCoverUrl } }
+      );
+    } catch (heroErr) {
+      console.warn('Failed to sync cover image to website hero section:', heroErr);
+    }
+
     res.status(200).json({
       success: true,
       data: { coverImage: buildUrl(req, coverPath) },
@@ -312,6 +324,17 @@ const removeCover = async (req, res) => {
     restaurant.coverImage = null;
     await restaurant.save();
 
+    // Reflect removal in website Hero Section
+    try {
+      const WebsiteSection = require('../models/WebsiteSection');
+      await WebsiteSection.findOneAndUpdate(
+        { restaurantId: restaurant._id, sectionId: 'hero' },
+        { $set: { 'content.imageUrl': '' } }
+      );
+    } catch (heroErr) {
+      console.warn('Failed to clear cover image from website hero section:', heroErr);
+    }
+
     res.status(200).json({ success: true, message: 'Cover image removed successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -333,6 +356,18 @@ const syncMasterMenuSelection = async (req, res) => {
     
     restaurant.masterMenuSelection = { categoryIds, itemIds };
     await restaurant.save();
+
+    // Reflect cover banner into website Hero Section
+    try {
+      const WebsiteSection = require('../models/WebsiteSection');
+      const fullCoverUrl = buildUrl(req, coverPath);
+      await WebsiteSection.findOneAndUpdate(
+        { restaurantId: restaurant._id, sectionId: 'hero' },
+        { $set: { 'content.imageUrl': fullCoverUrl } }
+      );
+    } catch (heroErr) {
+      console.warn('Failed to sync cover image to website hero section:', heroErr);
+    }
 
     const masterCategories = await MasterCategory.find({ _id: { $in: categoryIds } });
     const masterItems = await MasterItem.find({ _id: { $in: itemIds } });

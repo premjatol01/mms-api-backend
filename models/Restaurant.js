@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { RESTAURANT_TYPES } = require('../constants/restaurantTypes');
 
 const restaurantSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -35,7 +36,14 @@ const restaurantSchema = new mongoose.Schema({
   tagline: String,
   shortDescription: String,
   fullDescription: String,
-  restaurantType: String,
+  restaurantType: {
+    type: String,
+    enum: {
+      values: RESTAURANT_TYPES,
+      message: '{VALUE} is not a valid restaurant type'
+    },
+    set: (v) => (v === '' ? undefined : v)
+  },
   cuisineTypes: [String],
   establishmentYear: Number,
   coverImage: String,

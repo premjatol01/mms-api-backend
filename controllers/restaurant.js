@@ -132,6 +132,12 @@ exports.createRestaurant = async (req, res) => {
       data.websiteUrl = data.website.url || data.websiteUrl || '';
     }
 
+    if (data.description && !data.shortDescription) {
+      data.shortDescription = data.description;
+    } else if (data.shortDescription && !data.description) {
+      data.description = data.shortDescription;
+    }
+
     // Keep contact subdocument in sync
     if (!data.contact) data.contact = {};
     data.contact.primaryPhone = cleanRestaurantPhone;
@@ -449,7 +455,12 @@ exports.getRestaurantPortfolio = async (req, res) => {
     const isRestaurantPublished = restaurant.website?.status === 'published';
     const isConfigPublished = websiteConfig?.websiteStatus === 'published';
 
-    const isPublished = (isRestaurantPublished || isConfigPublished) &&
+    const hasSubdomain = Boolean(
+      (restaurant.website?.subdomain && restaurant.website.subdomain.trim()) ||
+      (websiteConfig?.restaurantSlug && websiteConfig.restaurantSlug.trim())
+    );
+
+    const isPublished = hasSubdomain && (isRestaurantPublished || isConfigPublished) &&
       restaurant.website?.status !== 'draft' &&
       websiteConfig?.websiteStatus !== 'draft';
 

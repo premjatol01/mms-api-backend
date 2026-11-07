@@ -268,7 +268,15 @@ exports.getWebsiteConfig = async (req, res) => {
       const sectionsToCreate = DEFAULT_SECTIONS.map((s) => ({
         ...s,
         restaurantId,
-        content: s.sectionId === 'footer' ? {
+        content: s.sectionId === 'hero' ? {
+          ...s.content,
+          heading: restaurant.name ? `Welcome to ${restaurant.name}` : s.content.heading,
+          description: restaurant.shortDescription || restaurant.description || s.content.description,
+          imageUrl: restaurant.coverImage ? (restaurant.coverImage.startsWith('http') ? restaurant.coverImage : `http://localhost:5000${restaurant.coverImage}`) : s.content.imageUrl
+        } : s.sectionId === 'about' ? {
+          ...s.content,
+          description: restaurant.shortDescription || restaurant.description || s.content.description,
+        } : s.sectionId === 'footer' ? {
           ...s.content,
           title: restaurant.name || s.content.title,
           subtitle: restaurant.tagline || s.content.subtitle || '',
@@ -384,7 +392,13 @@ exports.updateWebsiteConfig = async (req, res) => {
     if (email !== undefined) updateFields.email = email;
     if (address !== undefined) updateFields.address = address;
     if (websiteColors) updateFields.websiteColors = websiteColors;
-    if (restaurantSlug !== undefined) updateFields.restaurantSlug = restaurantSlug;
+    if (restaurantSlug !== undefined) {
+      const cleanSlug = (restaurantSlug || '').trim().toLowerCase();
+      updateFields.restaurantSlug = cleanSlug;
+      if (!cleanSlug) {
+        updateFields.websiteStatus = 'draft';
+      }
+    }
 
     const config = await WebsiteConfig.findOneAndUpdate(
       { restaurantId },
@@ -396,7 +410,13 @@ exports.updateWebsiteConfig = async (req, res) => {
     const restaurantUpdates = {};
     if (restaurantName) restaurantUpdates.name = restaurantName;
     if (description) restaurantUpdates.shortDescription = description;
-    if (restaurantSlug !== undefined) restaurantUpdates['website.subdomain'] = restaurantSlug;
+    if (restaurantSlug !== undefined) {
+      const cleanSlug = (restaurantSlug || '').trim().toLowerCase();
+      restaurantUpdates['website.subdomain'] = cleanSlug;
+      if (!cleanSlug) {
+        restaurantUpdates['website.status'] = 'draft';
+      }
+    }
     if (Object.keys(restaurantUpdates).length > 0) {
       await Restaurant.findByIdAndUpdate(restaurantId, { $set: restaurantUpdates });
     }

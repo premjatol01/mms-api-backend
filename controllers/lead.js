@@ -143,7 +143,7 @@ exports.updateLead = async (req, res) => {
       });
     }
 
-    const updatedLead = await Lead.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    const updatedLead = await Lead.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true });
     res.json(updatedLead);
   } catch (error) {
     res.status(400).json({ message: 'Error updating lead', error: error.message });

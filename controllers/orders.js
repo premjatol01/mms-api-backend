@@ -1216,7 +1216,8 @@ exports.markSessionPaid = async (req, res) => {
       });
     });
 
-    if (unresolved.length > 0 && req.body.force !== true) {
+    const isForce = req.body.force === true || req.body.force === 'true';
+    if (unresolved.length > 0 && !isForce) {
       if (dbSession) await dbSession.abortTransaction();
       return res.status(400).json({
         success: false,
@@ -1259,6 +1260,9 @@ exports.markSessionPaid = async (req, res) => {
     session.total = total;
     session.status = 'completed';
     session.paymentStatus = total > 0 ? 'successful' : 'not_required';
+    const allowedMethods = ['cash', 'upi', 'card', 'online', 'other'];
+    const pMethod = String(req.body.paymentMethod || 'cash').toLowerCase();
+    session.paymentMethod = allowedMethods.includes(pMethod) ? pMethod : 'cash';
     session.paidAt = now;
     session.closedAt = now;
     session.orderIds = orders.map((o) => o._id);

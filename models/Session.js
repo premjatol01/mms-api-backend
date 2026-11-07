@@ -10,6 +10,11 @@ const sessionSchema = new mongoose.Schema({
     enum: ['pending', 'successful', 'not_required'],
     default: 'pending'
   },
+  paymentMethod: {
+    type: String,
+    enum: ['cash', 'upi', 'card', 'online', 'other'],
+    default: 'cash'
+  },
   orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Order' }],
   subtotal: { type: Number, default: 0 },
   discount: { type: Number, default: 0 },
