@@ -81,6 +81,18 @@ exports.getRestaurant = async (req, res) => {
   }
 };
 
+// Helper to clean mobile number: strictly 10 digits without country code (+91 / 91)
+function sanitizeMobile(val) {
+  if (!val) return '';
+  let digits = String(val).replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length > 10) {
+    digits = digits.slice(-10);
+  }
+  return digits;
+}
+
 // @desc    Create new restaurant
 // @route   POST /api/restaurants
 exports.createRestaurant = async (req, res) => {
@@ -91,49 +103,121 @@ exports.createRestaurant = async (req, res) => {
     if (typeof data.admin === 'string') data.admin = JSON.parse(data.admin);
     if (typeof data.address === 'string') data.address = JSON.parse(data.address);
     if (typeof data.subscription === 'string') data.subscription = JSON.parse(data.subscription);
+    if (typeof data.contact === 'string') data.contact = JSON.parse(data.contact);
+
+    // 1. Sanitize & Normalize Contact Information (strictly 10-digit phone, no country code)
+    const cleanRestaurantPhone = sanitizeMobile(data.phone || data.contact?.primaryPhone);
+    const cleanRestaurantEmail = (data.email || data.contact?.email || '').trim().toLowerCase();
+    
+    data.phone = cleanRestaurantPhone;
+    data.email = cleanRestaurantEmail;
+
+    // Handle website
+    const rawWebsite = data.website || data.websiteUrl || '';
+    if (typeof rawWebsite === 'string') {
+      const cleanWeb = rawWebsite.trim();
+      data.websiteUrl = cleanWeb;
+      const subCandidate = cleanWeb
+        .replace(/^https?:\/\//i, '')
+        .split('/')[0]
+        .split('.')[0]
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '');
+      data.website = {
+        subdomain: subCandidate || (data.name ? data.name.toLowerCase().replace(/[^a-z0-9-]/g, '-') : 'restaurant'),
+        status: 'published',
+        url: cleanWeb
+      };
+    } else if (typeof data.website === 'object' && data.website !== null) {
+      data.websiteUrl = data.website.url || data.websiteUrl || '';
+    }
+
+    // Keep contact subdocument in sync
+    if (!data.contact) data.contact = {};
+    data.contact.primaryPhone = cleanRestaurantPhone;
+    data.contact.email = cleanRestaurantEmail;
+
+    // 2. Sanitize & Validate Restaurant Admin Information
+    if (!data.admin || !data.admin.email) {
+      return res.status(400).json({ success: false, message: 'Admin email is required' });
+    }
+    data.admin.name = (data.admin.name || '').trim();
+    data.admin.email = data.admin.email.trim().toLowerCase();
+    data.admin.phone = sanitizeMobile(data.admin.phone);
+
+    if (!data.admin.name) {
+      return res.status(400).json({ success: false, message: 'Admin name is required' });
+    }
+
+    if (!data.admin.phone || data.admin.phone.length !== 10) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid 10-digit admin mobile number without country code' });
+    }
+
+    // 3. Subscription package resolution
     if (data.subscription && (data.subscription.package || data.subscription.packageName)) {
       const pName = data.subscription.packageName || data.subscription.package;
-      const pkgDoc = await Package.findOne({ name: new RegExp('^' + pName + '$', 'i') });
+      const pkgDoc = await Package.findOne({ name: new RegExp('^' + pName + '\$', 'i') });
       if (pkgDoc) {
         data.subscription.packageId = pkgDoc._id;
         data.subscription.packageName = pkgDoc.name;
       }
     }
     
-// 1. Validate Admin Email Uniqueness & Generate Temp Password
+    // 4. Validate Admin Email Uniqueness & Generate Temp Password
     let tempHashedPassword;
-    if (data.admin && data.admin.email) {
-      const existingUser = await User.findOne({ email: data.admin.email });
-      if (existingUser) {
-        return res.status(400).json({ success: false, message: 'Admin email already exists' });
-      }
-
-      // Generate a temporary random password (user will set real one via invite link)
-      const crypto = require('crypto');
-      const tempPassword = crypto.randomBytes(16).toString('hex');
-      const salt = await bcrypt.genSalt(10);
-      tempHashedPassword = await bcrypt.hash(tempPassword, salt);
-    } else {
-      return res.status(400).json({ success: false, message: 'Admin email is required' });
+    const existingUser = await User.findOne({ email: data.admin.email });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'Admin email already exists' });
     }
+
+    const crypto = require('crypto');
+    const tempPassword = crypto.randomBytes(16).toString('hex');
+    const salt = await bcrypt.genSalt(10);
+    tempHashedPassword = await bcrypt.hash(tempPassword, salt);
 
     if (req.file) {
       data.logo = `/uploads/restaurants/${req.file.filename}`;
     }
 
-    // 2. Create the Restaurant
+    // 5. Create the Restaurant
     const restaurant = await Restaurant.create(data);
 
-    // 3. Create the corresponding User for Login (Starts inactive until invite accepted)
+    // 6. Create the corresponding User for Login (Starts inactive until invite accepted)
     await User.create({
       name: data.admin.name,
       email: data.admin.email,
       password: tempHashedPassword,
       phone: data.admin.phone,
+      mobile: data.admin.phone,
       role: 'restaurant_admin',
       restaurantId: restaurant._id,
-      status: 'inactive' // They must activate via email
+      status: 'inactive'
     });
+
+    // 7. Create Subscription Record in Central Ledger if package assigned
+    if (data.subscription && data.subscription.packageId) {
+      const Subscription = require('../models/Subscription');
+      const pkg = await Package.findById(data.subscription.packageId);
+      const days = Number(data.subscription.durationDays || data.subscription.duration || 30);
+      const start = data.subscription.startDate ? new Date(data.subscription.startDate) : new Date();
+      const end = data.subscription.endDate ? new Date(data.subscription.endDate) : new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+      
+      await Subscription.create({
+        restaurantId: restaurant._id,
+        restaurantName: restaurant.name,
+        adminName: restaurant.admin?.name || '',
+        adminEmail: restaurant.admin?.email || '',
+        packageId: data.subscription.packageId,
+        packageName: data.subscription.packageName || pkg?.name || 'Basic',
+        duration: days,
+        durationDisplay: data.subscription.durationDisplay || `${days} Days`,
+        startDate: start,
+        endDate: end,
+        price: data.subscription.price || pkg?.price || 0,
+        status: data.subscription.status || 'active',
+        features: pkg?.features || []
+      });
+    }
 
     res.status(201).json({ success: true, data: restaurant });
   } catch (error) {
@@ -150,9 +234,73 @@ exports.updateRestaurant = async (req, res) => {
     if (typeof data.admin === 'string') data.admin = JSON.parse(data.admin);
     if (typeof data.address === 'string') data.address = JSON.parse(data.address);
     if (typeof data.subscription === 'string') data.subscription = JSON.parse(data.subscription);
+    if (typeof data.contact === 'string') data.contact = JSON.parse(data.contact);
+
+    const existingRestaurant = await Restaurant.findById(req.params.id);
+    if (!existingRestaurant) return res.status(404).json({ success: false, message: 'Restaurant not found' });
+
+    // 1. Sanitize & Normalize Contact Information
+    if (data.phone !== undefined || data.contact?.primaryPhone !== undefined) {
+      const cleanPhone = sanitizeMobile(data.phone !== undefined ? data.phone : data.contact?.primaryPhone);
+      data.phone = cleanPhone;
+      if (!data.contact) data.contact = existingRestaurant.contact ? (existingRestaurant.contact.toObject?.() || existingRestaurant.contact) : {};
+      data.contact.primaryPhone = cleanPhone;
+    }
+
+    if (data.email !== undefined || data.contact?.email !== undefined) {
+      const cleanEmail = (data.email !== undefined ? data.email : data.contact?.email || '').trim().toLowerCase();
+      data.email = cleanEmail;
+      if (!data.contact) data.contact = existingRestaurant.contact ? (existingRestaurant.contact.toObject?.() || existingRestaurant.contact) : {};
+      data.contact.email = cleanEmail;
+    }
+
+    if (data.website !== undefined || data.websiteUrl !== undefined) {
+      const rawWebsite = data.website !== undefined ? data.website : data.websiteUrl;
+      if (typeof rawWebsite === 'string') {
+        const cleanWeb = rawWebsite.trim();
+        data.websiteUrl = cleanWeb;
+        data.website = {
+          subdomain: existingRestaurant.website?.subdomain || cleanWeb.replace(/^https?:\/\//i, '').split('/')[0].split('.')[0].toLowerCase().replace(/[^a-z0-9-]/g, '') || 'restaurant',
+          status: existingRestaurant.website?.status || 'published',
+          url: cleanWeb
+        };
+      } else if (typeof data.website === 'object' && data.website !== null) {
+        data.websiteUrl = data.website.url || data.websiteUrl || existingRestaurant.websiteUrl;
+      }
+    }
+
+    // 2. Sanitize & Sync Admin Information
+    if (data.admin) {
+      data.admin.name = (data.admin.name || existingRestaurant.admin?.name || '').trim();
+      data.admin.email = (data.admin.email || existingRestaurant.admin?.email || '').trim().toLowerCase();
+      data.admin.phone = sanitizeMobile(data.admin.phone || existingRestaurant.admin?.phone);
+
+      // Check if email changed and is taken by another user
+      if (data.admin.email && data.admin.email !== existingRestaurant.admin?.email) {
+        const emailTaken = await User.findOne({ email: data.admin.email, restaurantId: { $ne: existingRestaurant._id } });
+        if (emailTaken) {
+          return res.status(400).json({ success: false, message: 'Admin email already in use by another user' });
+        }
+      }
+
+      // Sync with User login model
+      await User.findOneAndUpdate(
+        { restaurantId: existingRestaurant._id, role: 'restaurant_admin' },
+        {
+          $set: {
+            name: data.admin.name,
+            email: data.admin.email,
+            phone: data.admin.phone,
+            mobile: data.admin.phone
+          }
+        }
+      );
+    }
+
+    // 3. Package resolution
     if (data.subscription && (data.subscription.package || data.subscription.packageName)) {
       const pName = data.subscription.packageName || data.subscription.package;
-      const pkgDoc = await Package.findOne({ name: new RegExp('^' + pName + '$', 'i') });
+      const pkgDoc = await Package.findOne({ name: new RegExp('^' + pName + '\$', 'i') });
       if (pkgDoc) {
         data.subscription.packageId = pkgDoc._id;
         data.subscription.packageName = pkgDoc.name;
@@ -164,7 +312,6 @@ exports.updateRestaurant = async (req, res) => {
     }
 
     const restaurant = await Restaurant.findByIdAndUpdate(req.params.id, data, { new: true, runValidators: true });
-    if (!restaurant) return res.status(404).json({ success: false, message: 'Restaurant not found' });
     
     res.status(200).json({ success: true, data: restaurant });
   } catch (error) {

@@ -4,6 +4,9 @@ const restaurantSchema = new mongoose.Schema({
   name: { type: String, required: true },
   logo: { type: String, default: null },
   description: { type: String },
+  phone: { type: String },
+  email: { type: String, lowercase: true, trim: true },
+  websiteUrl: { type: String },
   admin: {
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true, sparse: true },
@@ -22,7 +25,7 @@ const restaurantSchema = new mongoose.Schema({
     duration: { type: String },
     durationDisplay: { type: String },
     price: { type: Number },
-    status: { type: String, enum: ['active', 'expired', 'pending'], default: 'pending' },
+    status: { type: String, enum: ['active', 'expired', 'pending', 'cancelled', 'expiring', 'scheduled'], default: 'pending' },
     startDate: { type: Date },
     endDate: { type: Date }
   },
@@ -74,7 +77,8 @@ const restaurantSchema = new mongoose.Schema({
 
   website: {
     subdomain: String,
-    status: { type: String, enum: ['published', 'draft', 'inactive'] }
+    status: { type: String, enum: ['published', 'draft', 'inactive'] },
+    url: String
   },
 
   googleReviewLink: String,
