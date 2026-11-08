@@ -45,7 +45,11 @@ exports.createCategory = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { name, description, status } = req.body;
-    const updateData = { name, description, status };
+    const updateData = {};
+
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (status !== undefined) updateData.status = status;
 
     if (req.file) {
       updateData.image = `/uploads/master-menu/${req.file.filename}`;
@@ -55,7 +59,7 @@ exports.updateCategory = async (req, res) => {
 
     const category = await MasterCategory.findByIdAndUpdate(
       req.params.id,
-      updateData,
+      { $set: updateData },
       { new: true, runValidators: true }
     );
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
@@ -98,7 +102,7 @@ exports.getItems = async (req, res) => {
 // @route   POST /api/master-menu/items
 exports.createItem = async (req, res) => {
   try {
-    const { categoryId, name, status } = req.body;
+    const { categoryId, name, description, status } = req.body;
     let image = req.body.image || null; // fallback to body if passing URL
     
     if (req.file) {
@@ -111,6 +115,7 @@ exports.createItem = async (req, res) => {
     const item = await MasterItem.create({
       categoryId,
       name,
+      description: description || '',
       image,
       status: status || 'active'
     });
@@ -126,8 +131,13 @@ exports.createItem = async (req, res) => {
 // @route   PUT /api/master-menu/items/:id
 exports.updateItem = async (req, res) => {
   try {
-    const { categoryId, name, status } = req.body;
-    const updateData = { categoryId, name, status };
+    const { categoryId, name, description, status } = req.body;
+    const updateData = {};
+
+    if (categoryId !== undefined) updateData.categoryId = categoryId;
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (status !== undefined) updateData.status = status;
 
     if (req.file) {
       updateData.image = `/uploads/master-menu/${req.file.filename}`;
@@ -137,7 +147,7 @@ exports.updateItem = async (req, res) => {
 
     const item = await MasterItem.findByIdAndUpdate(
       req.params.id,
-      updateData,
+      { $set: updateData },
       { new: true, runValidators: true }
     ).populate('categoryId', 'name');
 

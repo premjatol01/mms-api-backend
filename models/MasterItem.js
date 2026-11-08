@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const masterItemSchema = new mongoose.Schema({
   categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'MasterCategory', required: true },
   name: { type: String, required: true },
+  description: { type: String, default: '' },
   image: { type: String },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' }
 }, { timestamps: true });
