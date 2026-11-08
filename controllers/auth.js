@@ -236,8 +236,6 @@ const logoutUser = async (req, res) => {
   }
 };
 
-const jwt = require('jsonwebtoken');
-
 // @desc    Setup password via invite token
 // @route   POST /api/auth/setup-password
 // @access  Public

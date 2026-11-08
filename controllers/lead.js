@@ -101,9 +101,9 @@ exports.createLead = async (req, res) => {
     const leadData = req.body;
     
     // Add initial activity
-    leadData.activity = [{
+    if (!leadData.activity || !leadData.activity.length) leadData.activity = [{
       date: new Date(),
-      action: "Lead created"
+      action: leadData.stage === 'prospect' ? "Lead registered as Prospect" : "Lead created"
     }];
 
     const lead = new Lead(leadData);

@@ -24,7 +24,7 @@ const leadSchema = new mongoose.Schema({
   stage: {
     type: String,
     enum: ['prospect', 'new_lead', 'contacted', 'qualified', 'interested', 'follow_up', 'converted', 'lost'],
-    default: 'new_lead'
+    default: 'prospect'
   },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' },
   notes: { type: String },
