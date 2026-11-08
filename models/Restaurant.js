@@ -92,9 +92,9 @@ const restaurantSchema = new mongoose.Schema({
   googleReviewLink: String,
 
   settings: {
-    isActive: Boolean,
-    acceptOrders: Boolean,
-    showOnPublicWebsite: Boolean
+    isActive: { type: Boolean, default: true },
+    acceptOrders: { type: Boolean, default: true },
+    showOnPublicWebsite: { type: Boolean, default: false }
   },
 
   masterMenuSelection: {

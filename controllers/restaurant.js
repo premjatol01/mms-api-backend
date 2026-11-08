@@ -482,6 +482,15 @@ exports.getRestaurantPortfolio = async (req, res) => {
       });
     }
 
+    // Check if restaurant is active
+    if ((restaurant.status && restaurant.status !== 'active') || restaurant.settings?.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        isInactive: true,
+        message: `Restaurant '${restaurant.name}' is currently inactive.`
+      });
+    }
+
     const restaurantData = restaurant.toObject ? restaurant.toObject() : { ...restaurant };
     const rawColors = websiteConfig?.websiteColors?.toObject ? websiteConfig.websiteColors.toObject() : websiteConfig?.websiteColors;
     restaurantData.websiteColors = {
@@ -494,6 +503,10 @@ exports.getRestaurantPortfolio = async (req, res) => {
     if (websiteConfig) {
       restaurantData.websiteConfig = websiteConfig;
     }
+    restaurantData.settings = {
+      isActive: restaurant.settings?.isActive !== false,
+      acceptOrders: restaurant.settings?.acceptOrders !== false
+    };
 
     const WebsiteSection = require('../models/WebsiteSection');
     let sections = await WebsiteSection.find({ restaurantId: restaurant._id, enabled: true }).sort({ order: 1 });
@@ -771,7 +784,7 @@ exports.verifyTableSession = async (req, res) => {
     }
 
     // 2. Check if restaurant is active
-    if (restaurant.status && restaurant.status !== 'active') {
+    if ((restaurant.status && restaurant.status !== 'active') || restaurant.settings?.isActive === false) {
       return res.status(403).json({
         success: false,
         errorType: 'RESTAURANT_INACTIVE',
@@ -856,7 +869,11 @@ exports.verifyTableSession = async (req, res) => {
           coverImage: restaurant.coverImage,
           subdomain: restaurant.website?.subdomain,
           status: restaurant.status,
-          currency: '₹'
+          currency: '₹',
+          settings: {
+            isActive: restaurant.settings?.isActive !== false,
+            acceptOrders: restaurant.settings?.acceptOrders !== false
+          }
         },
         table: {
           id: table._id,

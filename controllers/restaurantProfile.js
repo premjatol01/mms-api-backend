@@ -92,7 +92,11 @@ const formatProfile = (restaurant, req) => {
     // Other sections
     googleReviewLink: r.googleReviewLink || '',
     website: r.website || {},
-    settings: r.settings || { isActive: false, acceptOrders: false, showOnPublicWebsite: false },
+    settings: {
+      isActive: r.settings?.isActive !== undefined ? Boolean(r.settings.isActive) : (r.status ? r.status === 'active' : true),
+      acceptOrders: r.settings?.acceptOrders !== undefined ? Boolean(r.settings.acceptOrders) : true,
+      showOnPublicWebsite: r.settings?.showOnPublicWebsite !== undefined ? Boolean(r.settings.showOnPublicWebsite) : false,
+    },
 
     // Read-only subscription info (for the Subscription tab)
     subscription: r.subscription || {},
@@ -177,6 +181,11 @@ const updateProfile = async (req, res) => {
     };
 
     flatten(body);
+
+    const updatedIsActive = body.settings?.isActive !== undefined ? body.settings.isActive : $set['settings.isActive'];
+    if (updatedIsActive !== undefined) {
+      $set['status'] = updatedIsActive ? 'active' : 'inactive';
+    }
 
     const updated = await Restaurant.findByIdAndUpdate(
       req.user.restaurantId,

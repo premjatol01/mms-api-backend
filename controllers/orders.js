@@ -198,7 +198,7 @@ async function resolveRestaurantAndTable(subdomain, tableId) {
   }
 
   if (!restaurant) return { error: `Restaurant '${subdomain}' not found.` };
-  if (restaurant.status && restaurant.status !== 'active') {
+  if ((restaurant.status && restaurant.status !== 'active') || restaurant.settings?.isActive === false) {
     return { error: `Restaurant '${restaurant.name}' is currently inactive.` };
   }
 
@@ -264,7 +264,11 @@ exports.getPublicTableSession = async (req, res) => {
           id: restaurant._id,
           name: restaurant.name,
           subdomain: restaurant.website?.subdomain,
-          currency: '₹'
+          currency: '₹',
+          settings: {
+            isActive: restaurant.settings?.isActive !== false,
+            acceptOrders: restaurant.settings?.acceptOrders !== false
+          }
         },
         table: {
           id: table._id,
@@ -318,6 +322,13 @@ exports.placePublicOrder = async (req, res) => {
     }
 
     const { restaurant, table } = resolved;
+
+    if (restaurant.settings?.acceptOrders === false) {
+      return res.status(400).json({
+        success: false,
+        message: 'This restaurant is currently not accepting new orders.'
+      });
+    }
 
     // 1. Find or create an active Session for this table
     let session = await Session.findOne({
