@@ -18,7 +18,12 @@ const platformSettingsSchema = new mongoose.Schema({
   dateFormat: { type: String, default: 'DD/MM/YYYY' },
   timeFormat: { type: String, default: '12 Hour' },
   maintenanceEnabled: { type: Boolean, default: false },
-  maintenanceMessage: { type: String }
+  maintenanceMessage: { type: String },
+  paymentQrUrl: { type: String, default: null },
+  paymentUpiId: { type: String, default: 'tablly@upi' },
+  paymentAccountName: { type: String, default: 'Tablly Technologies' },
+  paymentBankDetails: { type: String, default: '' },
+  paymentInstructions: { type: String, default: 'Scan the QR code using any UPI app (GPay, PhonePe, Paytm), complete the payment, and upload the screenshot with transaction reference / UTR number.' }
 }, { timestamps: true });
 
 module.exports = mongoose.model('PlatformSettings', platformSettingsSchema);

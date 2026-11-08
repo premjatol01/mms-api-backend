@@ -40,10 +40,10 @@ const {
 
 router.route('/categories')
   .get(getCategories)
-  .post(createCategory);
+  .post(upload.single('image'), createCategory);
 
 router.route('/categories/:id')
-  .put(updateCategory)
+  .put(upload.single('image'), updateCategory)
   .delete(deleteCategory);
 
 router.route('/items')

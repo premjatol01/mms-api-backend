@@ -9,8 +9,8 @@ const ALLOWED_DOC_MIME = [
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ];
-const MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
-const MAX_DOC_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB for payment screenshots
+const MAX_DOC_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 const createUploader = (folder, options = {}) => {
   const { allowDocs = false } = options;
@@ -46,5 +46,7 @@ const createUploader = (folder, options = {}) => {
 };
 
 const restaurantUploader = createUploader('restaurants');
+const proofUploader = createUploader('subscription-proofs');
+const paymentQrUploader = createUploader('payment-qr');
 
-module.exports = { restaurantUploader, createUploader };
+module.exports = { restaurantUploader, proofUploader, paymentQrUploader, createUploader };

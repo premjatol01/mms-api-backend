@@ -18,10 +18,22 @@ exports.getCategories = async (req, res) => {
 // @route   POST /api/master-menu/categories
 exports.createCategory = async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, status } = req.body;
+    let image = req.body.image || null;
+
+    if (req.file) {
+      // Store the relative path to be served statically
+      image = `/uploads/master-menu/${req.file.filename}`;
+    }
+
     if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
 
-    const category = await MasterCategory.create({ name, description });
+    const category = await MasterCategory.create({
+      name,
+      description,
+      image,
+      status: status || 'active'
+    });
     res.status(201).json({ success: true, data: category, message: 'Category created successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -33,9 +45,17 @@ exports.createCategory = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { name, description, status } = req.body;
+    const updateData = { name, description, status };
+
+    if (req.file) {
+      updateData.image = `/uploads/master-menu/${req.file.filename}`;
+    } else if (req.body.image !== undefined) {
+      updateData.image = req.body.image || null;
+    }
+
     const category = await MasterCategory.findByIdAndUpdate(
       req.params.id,
-      { name, description, status },
+      updateData,
       { new: true, runValidators: true }
     );
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
@@ -78,8 +98,8 @@ exports.getItems = async (req, res) => {
 // @route   POST /api/master-menu/items
 exports.createItem = async (req, res) => {
   try {
-    const { categoryId, name } = req.body;
-    let image = req.body.image; // fallback to body if passing URL
+    const { categoryId, name, status } = req.body;
+    let image = req.body.image || null; // fallback to body if passing URL
     
     if (req.file) {
       // Store the relative path to be served statically
@@ -88,7 +108,12 @@ exports.createItem = async (req, res) => {
 
     if (!categoryId || !name) return res.status(400).json({ success: false, message: 'Category and Name are required' });
 
-    const item = await MasterItem.create({ categoryId, name, image });
+    const item = await MasterItem.create({
+      categoryId,
+      name,
+      image,
+      status: status || 'active'
+    });
     const populatedItem = await MasterItem.findById(item._id).populate('categoryId', 'name');
 
     res.status(201).json({ success: true, data: populatedItem, message: 'Item created successfully' });
@@ -102,15 +127,17 @@ exports.createItem = async (req, res) => {
 exports.updateItem = async (req, res) => {
   try {
     const { categoryId, name, status } = req.body;
-    let image = req.body.image;
+    const updateData = { categoryId, name, status };
 
     if (req.file) {
-      image = `/uploads/master-menu/${req.file.filename}`;
+      updateData.image = `/uploads/master-menu/${req.file.filename}`;
+    } else if (req.body.image !== undefined) {
+      updateData.image = req.body.image || null;
     }
 
     const item = await MasterItem.findByIdAndUpdate(
       req.params.id,
-      { categoryId, name, image, status },
+      updateData,
       { new: true, runValidators: true }
     ).populate('categoryId', 'name');
 

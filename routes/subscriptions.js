@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { paymentQrUploader } = require('../middleware/upload');
 
 const {
   getSubscriptions,
@@ -9,10 +10,28 @@ const {
   renewSubscription,
   changePackage,
   cancelSubscription,
-  reactivateSubscription
+  reactivateSubscription,
+  getPaymentRequests,
+  reviewPaymentRequest,
+  getTickets,
+  updateTicket,
+  getPaymentConfig,
+  updatePaymentConfig
 } = require('../controllers/subscriptions');
 
 router.get('/summary', getSubscriptionSummary);
+
+// Payment Verification Requests (Super Admin)
+router.get('/payment-requests', getPaymentRequests);
+router.patch('/payment-requests/:id', reviewPaymentRequest);
+
+// Subscription Support Tickets (Super Admin)
+router.get('/tickets', getTickets);
+router.patch('/tickets/:id', updateTicket);
+
+// Payment QR / UPI Configuration
+router.get('/payment-config', getPaymentConfig);
+router.put('/payment-config', paymentQrUploader.single('paymentQr'), updatePaymentConfig);
 
 router.route('/')
   .get(getSubscriptions)

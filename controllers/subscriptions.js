@@ -2,6 +2,9 @@ const mongoose = require('mongoose');
 const Subscription = require('../models/Subscription');
 const Restaurant = require('../models/Restaurant');
 const Package = require('../models/Package');
+const RenewalRequest = require('../models/RenewalRequest');
+const SubscriptionTicket = require('../models/SubscriptionTicket');
+const PlatformSettings = require('../models/PlatformSettings');
 
 // Helper to determine real-time status of a subscription
 function computeRealtimeStatus(sub) {
@@ -153,15 +156,31 @@ exports.getSubscriptions = async (req, res) => {
       else if (computed === 'expired' || computed === 'cancelled') expiredCount++;
     });
 
-    // Map realtime status
+    // Query pending payment verification requests
+    const pendingPayments = await RenewalRequest.find({ status: 'pending' }).sort({ createdAt: -1 });
+
+    // Map realtime status and attach pendingPayment info
     const data = subscriptions.map((sub) => {
       const doc = sub.toObject();
       doc.realtimeStatus = computeRealtimeStatus(sub);
-      if (doc.status === 'active' && doc.realtimeStatus === 'expiring') {
-        doc.status = 'expiring';
-      } else if (doc.status === 'active' && doc.realtimeStatus === 'expired') {
+      if (doc.realtimeStatus === 'expired') {
         doc.status = 'expired';
+      } else if (doc.status === 'active' && doc.realtimeStatus === 'expiring') {
+        doc.status = 'expiring';
       }
+
+      // Check if this restaurant has a pending payment verification
+      const pending = pendingPayments.find(
+        (p) => String(p.restaurantId) === String(sub.restaurantId)
+      );
+      if (pending) {
+        doc.hasPendingPayment = true;
+        doc.pendingPayment = pending.toObject();
+      } else {
+        doc.hasPendingPayment = false;
+        doc.pendingPayment = null;
+      }
+
       return doc;
     });
 
@@ -178,6 +197,7 @@ exports.getSubscriptions = async (req, res) => {
         active: activeCount,
         expiring: expiringCount,
         expired: expiredCount,
+        pendingVerification: pendingPayments.length
       }
     });
   } catch (error) {
@@ -204,6 +224,8 @@ exports.getSubscriptionSummary = async (req, res) => {
       else if (computed === 'expired' || computed === 'cancelled') expiredCount++;
     });
 
+    const pendingVerification = await RenewalRequest.countDocuments({ status: 'pending' });
+
     res.status(200).json({
       success: true,
       data: {
@@ -211,6 +233,7 @@ exports.getSubscriptionSummary = async (req, res) => {
         active: activeCount,
         expiring: expiringCount,
         expired: expiredCount,
+        pendingVerification
       }
     });
   } catch (error) {
@@ -489,6 +512,237 @@ exports.reactivateSubscription = async (req, res) => {
       success: true, 
       data: subscription, 
       message: 'Subscription reactivated successfully' 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get all payment verification requests (pending / confirmed / rejected)
+// @route   GET /api/subscriptions/payment-requests
+// @access  Private (Super Admin)
+exports.getPaymentRequests = async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    const query = {};
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { restaurantName: { $regex: search, $options: 'i' } },
+        { adminName: { $regex: search, $options: 'i' } },
+        { transactionRef: { $regex: search, $options: 'i' } },
+        { planName: { $regex: search, $options: 'i' } }
+      ];
+    }
+    const requests = await RenewalRequest.find(query).sort({ createdAt: -1 });
+    res.status(200).json({ success: true, data: requests });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Review payment request (confirm or reject)
+// @route   PATCH /api/subscriptions/payment-requests/:id
+// @access  Private (Super Admin)
+exports.reviewPaymentRequest = async (req, res) => {
+  try {
+    const { status, reviewNote } = req.body;
+    if (!['confirmed', 'rejected', 'approved'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status. Must be confirmed or rejected' });
+    }
+
+    const finalStatus = status === 'approved' ? 'confirmed' : status;
+
+    const request = await RenewalRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ success: false, message: 'Payment request not found' });
+    }
+
+    request.status = finalStatus;
+    request.reviewNote = reviewNote || '';
+    request.reviewedAt = new Date();
+    request.reviewedBy = req.user?.name || 'Super Admin';
+    await request.save();
+
+    if (finalStatus === 'confirmed') {
+      const restaurant = await Restaurant.findById(request.restaurantId);
+      if (!restaurant) {
+        return res.status(404).json({ success: false, message: 'Restaurant not found' });
+      }
+
+      // Resolve package
+      let pkg = null;
+      if (request.packageId) pkg = await Package.findById(request.packageId);
+      if (!pkg && request.planName) {
+        pkg = await Package.findOne({ name: new RegExp('^' + request.planName + '$', 'i') });
+      }
+
+      const durationDays = Number(request.durationDays || 30);
+      const now = new Date();
+      let start = now;
+      let end = new Date(now);
+
+      // If restaurant has an active subscription that hasn't expired, extend from existing endDate
+      if (
+        restaurant.subscription?.endDate &&
+        new Date(restaurant.subscription.endDate) > now &&
+        request.requestType === 'renew'
+      ) {
+        start = new Date(restaurant.subscription.startDate || now);
+        end = new Date(restaurant.subscription.endDate);
+        end.setDate(end.getDate() + durationDays);
+      } else {
+        end.setDate(end.getDate() + durationDays);
+      }
+
+      const display = request.durationDisplay || (durationDays === 30 ? '1 Month (30 Days)' : durationDays === 180 ? '6 Months (180 Days)' : durationDays === 365 ? '12 Months / 1 Year' : `${durationDays} Days`);
+
+      // Invalidate old active subscriptions for this restaurant
+      await Subscription.updateMany(
+        { restaurantId: restaurant._id, status: 'active' },
+        { $set: { status: 'cancelled' } }
+      );
+
+      // Create new active Subscription record
+      await Subscription.create({
+        restaurantId: restaurant._id,
+        restaurantName: restaurant.name,
+        adminName: restaurant.admin?.name || '',
+        adminEmail: restaurant.admin?.email || '',
+        packageId: pkg?._id || restaurant.subscription?.packageId,
+        packageName: pkg?.name || request.planName,
+        duration: durationDays,
+        durationDisplay: display,
+        startDate: start,
+        endDate: end,
+        price: request.amount || pkg?.price || 0,
+        status: 'active',
+        features: pkg?.features || []
+      });
+
+      // Update Restaurant document
+      restaurant.subscription = {
+        packageId: pkg?._id || restaurant.subscription?.packageId,
+        packageName: pkg?.name || request.planName,
+        package: pkg?.name || request.planName,
+        duration: String(durationDays),
+        durationDisplay: display,
+        price: request.amount || pkg?.price || 0,
+        status: 'active',
+        startDate: start,
+        endDate: end
+      };
+      await restaurant.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      data: request,
+      message: `Payment request marked as ${finalStatus} successfully`
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get all subscription support tickets
+// @route   GET /api/subscriptions/tickets
+// @access  Private (Super Admin)
+exports.getTickets = async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    const query = {};
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { restaurantName: { $regex: search, $options: 'i' } },
+        { subject: { $regex: search, $options: 'i' } },
+        { ticketNumber: { $regex: search, $options: 'i' } }
+      ];
+    }
+    const tickets = await SubscriptionTicket.find(query).sort({ createdAt: -1 });
+    res.status(200).json({ success: true, data: tickets });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Update ticket status and add reply
+// @route   PATCH /api/subscriptions/tickets/:id
+// @access  Private (Super Admin)
+exports.updateTicket = async (req, res) => {
+  try {
+    const { status, adminReply } = req.body;
+    const ticket = await SubscriptionTicket.findById(req.params.id);
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: 'Ticket not found' });
+    }
+    if (status) ticket.status = status;
+    if (adminReply !== undefined) {
+      ticket.adminReply = adminReply;
+      ticket.repliedAt = new Date();
+    }
+    await ticket.save();
+    res.status(200).json({ success: true, data: ticket, message: 'Ticket updated successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get payment config for manual QR payments
+// @route   GET /api/subscriptions/payment-config
+// @access  Private (Super Admin)
+exports.getPaymentConfig = async (req, res) => {
+  try {
+    const settings = await PlatformSettings.findOne({});
+    res.status(200).json({
+      success: true,
+      data: {
+        paymentQrUrl: settings?.paymentQrUrl || null,
+        paymentUpiId: settings?.paymentUpiId || 'tablly@upi',
+        paymentAccountName: settings?.paymentAccountName || 'Tablly Technologies',
+        paymentBankDetails: settings?.paymentBankDetails || '',
+        paymentInstructions: settings?.paymentInstructions || ''
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Update payment config (QR code, UPI ID, etc.)
+// @route   PUT /api/subscriptions/payment-config
+// @access  Private (Super Admin)
+exports.updatePaymentConfig = async (req, res) => {
+  try {
+    const { paymentUpiId, paymentAccountName, paymentBankDetails, paymentInstructions } = req.body;
+    let settings = await PlatformSettings.findOne({});
+    if (!settings) {
+      settings = new PlatformSettings({ platformName: 'Tablly' });
+    }
+
+    if (req.file) {
+      settings.paymentQrUrl = `/uploads/payment-qr/${req.file.filename}`;
+    } else if (req.body.paymentQrUrl !== undefined) {
+      settings.paymentQrUrl = req.body.paymentQrUrl;
+    }
+
+    if (paymentUpiId !== undefined) settings.paymentUpiId = paymentUpiId;
+    if (paymentAccountName !== undefined) settings.paymentAccountName = paymentAccountName;
+    if (paymentBankDetails !== undefined) settings.paymentBankDetails = paymentBankDetails;
+    if (paymentInstructions !== undefined) settings.paymentInstructions = paymentInstructions;
+
+    await settings.save();
+    res.status(200).json({
+      success: true,
+      data: {
+        paymentQrUrl: settings.paymentQrUrl,
+        paymentUpiId: settings.paymentUpiId,
+        paymentAccountName: settings.paymentAccountName,
+        paymentBankDetails: settings.paymentBankDetails,
+        paymentInstructions: settings.paymentInstructions
+      },
+      message: 'Payment configuration updated successfully'
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

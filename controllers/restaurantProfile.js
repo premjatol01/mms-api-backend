@@ -292,7 +292,26 @@ const uploadCover = async (req, res) => {
       const fullCoverUrl = buildUrl(req, coverPath);
       await WebsiteSection.findOneAndUpdate(
         { restaurantId: restaurant._id, sectionId: 'hero' },
-        { $set: { 'content.imageUrl': fullCoverUrl } }
+        { 
+          $set: { 'content.imageUrl': fullCoverUrl },
+          $setOnInsert: {
+            restaurantId: restaurant._id,
+            sectionId: 'hero',
+            type: 'hero',
+            title: 'Hero Section',
+            description: 'Main introduction with headline and image',
+            enabled: true,
+            order: 1,
+            content: {
+              heading: restaurant.name ? `Welcome to ${restaurant.name}` : 'Welcome to Tasty Bites',
+              description: restaurant.shortDescription || restaurant.description || 'Experience delicious food made with fresh ingredients.',
+              buttonText: 'View Menu',
+              buttonAction: 'menu',
+              imageUrl: fullCoverUrl
+            }
+          }
+        },
+        { upsert: true }
       );
     } catch (heroErr) {
       console.warn('Failed to sync cover image to website hero section:', heroErr);

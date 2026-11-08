@@ -304,6 +304,20 @@ exports.getWebsiteConfig = async (req, res) => {
 
       sections = await WebsiteSection.insertMany(sectionsToCreate);
     } else {
+      // Ensure Hero section image stays synchronized with restaurant.coverImage
+      const heroSec = sections.find((s) => s.sectionId === 'hero');
+      if (heroSec && restaurant.coverImage) {
+        const coverUrl = restaurant.coverImage.startsWith('http')
+          ? restaurant.coverImage
+          : `http://localhost:5000${restaurant.coverImage}`;
+        if (!heroSec.content?.imageUrl || heroSec.content?.imageUrl !== coverUrl) {
+          heroSec.content = { ...(heroSec.content || {}), imageUrl: coverUrl };
+          await WebsiteSection.updateOne(
+            { _id: heroSec._id },
+            { $set: { 'content.imageUrl': coverUrl } }
+          );
+        }
+      }
       const hasFooter = sections.some((s) => s.sectionId === 'footer');
       if (!hasFooter) {
         const defaultFooter = DEFAULT_SECTIONS.find((s) => s.sectionId === 'footer');
@@ -597,6 +611,16 @@ exports.updateSection = async (req, res) => {
       { $set: updateFields },
       { new: true, upsert: true }
     );
+
+    if (sectionId === 'hero' && content && typeof content === 'object') {
+      let coverImg = content.imageUrl || null;
+      if (coverImg && coverImg.startsWith('http://localhost:5000')) {
+        coverImg = coverImg.replace('http://localhost:5000', '');
+      }
+      await Restaurant.findByIdAndUpdate(restaurantId, {
+        $set: { coverImage: coverImg }
+      });
+    }
 
     if (sectionId === 'footer' && content && typeof content === 'object') {
       const socialUpdates = {};

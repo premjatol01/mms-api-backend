@@ -37,9 +37,19 @@ async function buildQRImageBuffer(scanUrl, template) {
       color: { dark: '#000000', light: '#ffffff' }
     });
 
-    return sharp(templateBuffer)
-      .composite([{ input: qrBuffer, left: leftPx, top: topPx }])
-      .toBuffer();
+    const format = (templateMeta.format || '').toLowerCase();
+    let pipeline = sharp(templateBuffer)
+      .composite([{ input: qrBuffer, left: leftPx, top: topPx }]);
+
+    if (format === 'png') {
+      pipeline = pipeline.png({ compressionLevel: 6, adaptiveFiltering: true });
+    } else if (format === 'jpeg' || format === 'jpg') {
+      pipeline = pipeline.jpeg({ quality: 98, chromaSubsampling: '4:4:4' });
+    } else if (format === 'webp') {
+      pipeline = pipeline.webp({ quality: 98, lossless: true });
+    }
+
+    return pipeline.toBuffer();
   }
 
   // Plain QR fallback
@@ -95,10 +105,30 @@ async function regenerateQRImage(qrDoc, restaurant, tableLabel) {
 
 exports.getTables = async (req, res) => {
   try {
-    const tables = await Table.find({ restaurantId: req.user.restaurantId })
+    const restaurantId = req.user.restaurantId;
+    const tables = await Table.find({ restaurantId })
       .populate('qrCodeId')
       .sort({ createdAt: -1 });
-    res.status(200).json({ success: true, data: tables });
+
+    const restaurant = await Restaurant.findById(restaurantId).populate('subscription.packageId');
+    let maxTables = 15;
+    let planName = 'Basic';
+    if (restaurant?.subscription?.packageId?.maxTables) {
+      maxTables = restaurant.subscription.packageId.maxTables;
+      planName = restaurant.subscription.packageId.name || restaurant.subscription.packageName || 'Basic';
+    } else if (restaurant?.subscription?.packageName) {
+      planName = restaurant.subscription.packageName;
+      const Package = require('../models/Package');
+      const pkg = await Package.findOne({ name: new RegExp(`^${restaurant.subscription.packageName}$`, 'i') });
+      if (pkg?.maxTables) maxTables = pkg.maxTables;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: tables,
+      maxTables,
+      planName
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -106,6 +136,96 @@ exports.getTables = async (req, res) => {
 
 exports.createTable = async (req, res) => {
   try {
+    const restaurantId = req.user.restaurantId;
+    const restaurant = await Restaurant.findById(restaurantId).populate('subscription.packageId');
+    let maxTables = 15;
+    let planName = 'Basic';
+    if (restaurant?.subscription?.packageId?.maxTables) {
+      maxTables = restaurant.subscription.packageId.maxTables;
+      planName = restaurant.subscription.packageId.name || restaurant.subscription.packageName || 'Basic';
+    } else if (restaurant?.subscription?.packageName) {
+      planName = restaurant.subscription.packageName;
+      const Package = require('../models/Package');
+      const pkg = await Package.findOne({ name: new RegExp(`^${restaurant.subscription.packageName}$`, 'i') });
+      if (pkg?.maxTables) maxTables = pkg.maxTables;
+    }
+
+    const currentTableCount = await Table.countDocuments({ restaurantId });
+
+    // Handle batch creation (from Profile Table Configuration)
+    if (req.body.count !== undefined) {
+      const count = parseInt(req.body.count, 10);
+      if (isNaN(count) || count < 1) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid number of tables' });
+      }
+
+      if (currentTableCount + count > maxTables) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot add ${count} tables. Your ${planName} plan allows a maximum of ${maxTables} tables (you currently have ${currentTableCount}).`
+        });
+      }
+
+      const { templateId } = req.body;
+      let qrTemplate = null;
+      if (templateId && templateId !== 'normal') {
+        qrTemplate = await QRTemplate.findById(templateId);
+      }
+
+      // Find highest existing table number to continue sequence smoothly
+      const existingTables = await Table.find({ restaurantId }).select('tableNo tableId');
+      let maxNum = 0;
+      for (const t of existingTables) {
+        const num = parseInt((t.tableNo || t.tableId || '').replace(/\D/g, ''), 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      }
+
+      const createdTables = [];
+      for (let i = 1; i <= count; i++) {
+        const tableNum = maxNum + i;
+        const tableLabel = `Table ${tableNum}`;
+
+        const table = await Table.create({
+          restaurantId,
+          tableId: tableLabel,
+          tableNo: tableLabel,
+          status: 'active'
+        });
+
+        // Always create default QR code (with template overlay if selected, or normal plain QR)
+        const scanUrl = buildScanUrl(restaurant, table._id);
+        const qrDoc = new QrCode({
+          restaurantId,
+          tableId: table._id,
+          name: `${tableLabel} QR`,
+          status: 'assigned',
+          templateId: qrTemplate ? qrTemplate._id : null,
+          scanUrl
+        });
+
+        const imageBuffer = await buildQRImageBuffer(scanUrl, qrTemplate);
+        const filename = `qr-${restaurantId}-${qrDoc._id}.png`;
+        const filepath = path.join(uploadDir, filename);
+        fs.writeFileSync(filepath, imageBuffer);
+
+        qrDoc.imageUrl = `/uploads/table-qrs/${filename}`;
+        await qrDoc.save();
+
+        table.qrCodeId = qrDoc._id;
+        await table.save();
+
+        const populated = await Table.findById(table._id).populate('qrCodeId');
+        createdTables.push(populated);
+      }
+
+      return res.status(201).json({
+        success: true,
+        data: createdTables,
+        message: `${count} tables created with default QR code successfully`
+      });
+    }
+
+    // Single table creation (from Tables & QR module)
     const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId } = req.body;
     const userLabel = (inputTableNo || inputTableId || '').trim();
 
@@ -113,8 +233,15 @@ exports.createTable = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Table No. is required' });
     }
 
+    if (currentTableCount >= maxTables) {
+      return res.status(400).json({
+        success: false,
+        message: `Your ${planName} plan table limit (${maxTables}) reached. Please upgrade your subscription to add more tables.`
+      });
+    }
+
     const exists = await Table.findOne({
-      restaurantId: req.user.restaurantId,
+      restaurantId,
       $or: [
         { tableNo: new RegExp(`^${userLabel}$`, 'i') },
         { tableId: new RegExp(`^${userLabel}$`, 'i') }
@@ -125,7 +252,7 @@ exports.createTable = async (req, res) => {
     }
 
     const table = await Table.create({
-      restaurantId: req.user.restaurantId,
+      restaurantId,
       tableId: userLabel,
       tableNo: userLabel,
       status: status || 'active',
@@ -134,9 +261,7 @@ exports.createTable = async (req, res) => {
 
     if (qrCodeId) {
       const qrDoc = await QrCode.findByIdAndUpdate(qrCodeId, { tableId: table._id, status: 'assigned' }, { new: true });
-      // Regenerate QR image with the MongoDB ID URL
       if (qrDoc) {
-        const restaurant = await Restaurant.findById(req.user.restaurantId);
         await regenerateQRImage(qrDoc, restaurant, table._id);
       }
     }
@@ -150,7 +275,7 @@ exports.createTable = async (req, res) => {
 
 exports.updateTable = async (req, res) => {
   try {
-    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId } = req.body;
+    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId, templateId } = req.body;
 
     const table = await Table.findById(req.params.id);
     if (!table) return res.status(404).json({ success: false, message: 'Table not found' });
@@ -172,7 +297,7 @@ exports.updateTable = async (req, res) => {
 
     const restaurant = await Restaurant.findById(req.user.restaurantId);
 
-    // Handle QR reassignment
+    // Handle explicit QR reassignment
     if (qrCodeId !== undefined && String(qrCodeId) !== String(table.qrCodeId)) {
       if (table.qrCodeId) {
         await QrCode.findByIdAndUpdate(table.qrCodeId, { tableId: null, status: 'available' });
@@ -187,6 +312,38 @@ exports.updateTable = async (req, res) => {
       const qrDoc = await QrCode.findById(table.qrCodeId);
       if (qrDoc && (!qrDoc.scanUrl || !qrDoc.scanUrl.includes(`/menu/${table._id}`))) {
         await regenerateQRImage(qrDoc, restaurant, table._id);
+      }
+    }
+
+    // Handle templateId update for table's QR code
+    if (templateId !== undefined) {
+      const targetTemplateId = (templateId && templateId !== 'plain' && templateId !== 'normal') ? templateId : null;
+      if (table.qrCodeId) {
+        const qrDoc = await QrCode.findById(table.qrCodeId);
+        if (qrDoc) {
+          qrDoc.templateId = targetTemplateId;
+          await qrDoc.save();
+          await regenerateQRImage(qrDoc, restaurant, table._id);
+        }
+      } else if (targetTemplateId !== undefined && templateId !== null) {
+        const scanUrl = buildScanUrl(restaurant, table._id);
+        const qrTemplate = targetTemplateId ? await QRTemplate.findById(targetTemplateId) : null;
+        const qrDoc = new QrCode({
+          restaurantId: req.user.restaurantId,
+          tableId: table._id,
+          name: `${userLabel || table.tableNo || 'Table'} QR`,
+          status: 'assigned',
+          templateId: targetTemplateId,
+          scanUrl
+        });
+        const imageBuffer = await buildQRImageBuffer(scanUrl, qrTemplate);
+        const filename = `qr-${req.user.restaurantId}-${qrDoc._id}.png`;
+        const filepath = path.join(uploadDir, filename);
+        fs.writeFileSync(filepath, imageBuffer);
+        qrDoc.imageUrl = `/uploads/table-qrs/${filename}`;
+        await qrDoc.save();
+        table.qrCodeId = qrDoc._id;
+        await table.save();
       }
     }
 
