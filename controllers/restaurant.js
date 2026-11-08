@@ -338,6 +338,11 @@ exports.bulkUpdateStatus = async (req, res) => {
       { _id: { $in: ids } },
       { $set: { status } }
     );
+
+    await User.updateMany(
+      { restaurantId: { $in: ids }, role: 'restaurant_admin' },
+      { $set: { status } }
+    );
     
     res.status(200).json({ success: true, message: `Updated ${ids.length} restaurants to ${status}` });
   } catch (error) {
@@ -354,6 +359,11 @@ exports.toggleStatus = async (req, res) => {
     
     restaurant.status = restaurant.status === 'active' ? 'inactive' : 'active';
     await restaurant.save();
+
+    await User.updateMany(
+      { restaurantId: restaurant._id, role: 'restaurant_admin' },
+      { $set: { status: restaurant.status } }
+    );
     
     res.status(200).json({ success: true, data: restaurant });
   } catch (error) {

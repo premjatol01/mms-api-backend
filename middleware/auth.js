@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Restaurant = require('../models/Restaurant');
 
 /**
  * Protect middleware — verifies JWT from cookie or Authorization header.
@@ -13,7 +14,7 @@ const protect = async (req, res, next) => {
     if (req.cookies?.jwt) {
       token = req.cookies.jwt;
     }
-    // 2. Fall back to Bearer token in Authorization header (e.g. Postman testing)
+    // 2. Fall back to Bearer token in Authorization header (e.g. Postman testing or cross-port fallback)
     else if (req.headers.authorization?.startsWith('Bearer ')) {
       token = req.headers.authorization.split(' ')[1];
     }
@@ -23,7 +24,7 @@ const protect = async (req, res, next) => {
     }
 
     // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tablly_super_secret_key_2026');
 
     // Attach minimal user to request (avoid leaking password)
     const user = await User.findById(decoded.userId).select('-password');
@@ -32,14 +33,28 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Not authorized, user not found' });
     }
 
+    // Check user active status
     if (user.status !== 'active') {
-      return res.status(403).json({ success: false, message: 'Your account is inactive' });
+      return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact administrator.' });
+    }
+
+    // If restaurant admin, also verify restaurant active status
+    if (user.role === 'restaurant_admin' && user.restaurantId) {
+      const restaurant = await Restaurant.findById(user.restaurantId).select('status');
+      if (restaurant && restaurant.status !== 'active') {
+        return res.status(403).json({ success: false, message: 'Your restaurant account is inactive. Please contact administrator.' });
+      }
     }
 
     req.user = user;
     next();
   } catch (error) {
-    return res.status(401).json({ success: false, message: 'Not authorized, invalid token' });
+    const isExpired = error.name === 'TokenExpiredError';
+    return res.status(401).json({
+      success: false,
+      message: isExpired ? 'Token expired' : 'Not authorized, invalid token',
+      code: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN'
+    });
   }
 };
 

@@ -1,13 +1,22 @@
 const User = require('../models/User');
-const generateToken = require('../utils/generateToken');
+const Restaurant = require('../models/Restaurant');
+const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const generateToken = require('../utils/generateToken');
+const {
+  generateAccessToken,
+  generateRefreshToken,
+  setAuthCookiesAndTokens,
+  JWT_SECRET,
+  JWT_REFRESH_SECRET
+} = require('../utils/generateToken');
 
 // @desc    Auth user (login) & get token
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, rememberMe } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Please provide email and password' });
@@ -19,14 +28,25 @@ const loginUser = async (req, res) => {
     // Check if user exists and password matches
     if (user && (await bcrypt.compare(password, user.password))) {
       if (user.status !== 'active') {
-        return res.status(403).json({ success: false, message: 'Your account is inactive' });
+        return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact administrator.' });
       }
 
-      // Generate token and set cookie
-      const token = generateToken(res, user._id, user.role, user.restaurantId);
+      // If restaurant admin, verify associated restaurant is active as well
+      if (user.role === 'restaurant_admin' && user.restaurantId) {
+        const restro = await Restaurant.findById(user.restaurantId).select('status');
+        if (restro && restro.status !== 'active') {
+          return res.status(403).json({ success: false, message: 'Your restaurant account is inactive. Please contact administrator.' });
+        }
+      }
 
-      // Update last login timestamp
+      const isRemember = Boolean(rememberMe);
+      const { accessToken, refreshToken } = setAuthCookiesAndTokens(res, user, isRemember);
+
+      // Update last login timestamp and refresh token record
       user.lastLoginAt = new Date();
+      if (user.role === 'restaurant_admin') {
+        user.refreshToken = isRemember ? refreshToken : null;
+      }
       await user.save();
 
       res.status(200).json({
@@ -39,7 +59,9 @@ const loginUser = async (req, res) => {
             role: user.role,
             restaurantId: user.restaurantId
           },
-          token // optionally return token in body for clients that can't use cookies
+          token: accessToken,
+          refreshToken: refreshToken || undefined,
+          rememberMe: isRemember
         },
         message: 'Logged in successfully'
       });
@@ -97,16 +119,121 @@ const registerSuperAdmin = async (req, res) => {
   }
 };
 
-// @desc    Logout user / clear cookie
+// @desc    Refresh access token using refresh token
+// @route   POST /api/auth/refresh-token
+// @access  Public
+const refreshTokenHandler = async (req, res) => {
+  try {
+    let token = req.body?.refreshToken || req.cookies?.refreshToken;
+    if (!token && req.headers.authorization?.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+
+    if (!token) {
+      return res.status(401).json({ success: false, message: 'No refresh token provided' });
+    }
+
+    // Verify refresh token signature & expiration
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+    } catch (err) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+    }
+
+    if (decoded.tokenType && decoded.tokenType !== 'refresh') {
+      return res.status(401).json({ success: false, message: 'Invalid token type' });
+    }
+
+    // Find user
+    const user = await User.findById(decoded.userId).select('-password');
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'User not found' });
+    }
+
+    // Check if account is active
+    if (user.status !== 'active') {
+      return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact administrator.' });
+    }
+
+    // Enforce role restriction
+    if (user.role !== 'restaurant_admin') {
+      return res.status(403).json({ success: false, message: 'Refresh token only supported for restaurant admin' });
+    }
+
+    // Check restaurant status
+    if (user.restaurantId) {
+      const restro = await Restaurant.findById(user.restaurantId).select('status');
+      if (restro && restro.status !== 'active') {
+        return res.status(403).json({ success: false, message: 'Your restaurant account is inactive. Please contact administrator.' });
+      }
+    }
+
+    // Verify stored refresh token has not been revoked (e.g. via logout)
+    if (user.refreshToken && user.refreshToken !== token) {
+      return res.status(401).json({ success: false, message: 'Refresh token has been revoked' });
+    }
+
+    // Generate fresh access token (1 hour)
+    const newAccessToken = generateAccessToken(user._id, user.role, user.restaurantId, '1h');
+
+    // Update access cookie
+    res.cookie('jwt', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV !== 'development',
+      sameSite: 'lax',
+      maxAge: 1 * 60 * 60 * 1000,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        token: newAccessToken,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          restaurantId: user.restaurantId
+        }
+      },
+      message: 'Token refreshed successfully'
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Logout user / clear cookie & invalidate refresh token
 // @route   POST /api/auth/logout
 // @access  Public
-const logoutUser = (req, res) => {
-  res.cookie('jwt', '', {
-    httpOnly: true,
-    expires: new Date(0),
-  });
+const logoutUser = async (req, res) => {
+  try {
+    let token = req.cookies?.jwt || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null);
+    if (token) {
+      try {
+        const decoded = jwt.decode(token);
+        if (decoded?.userId) {
+          await User.findByIdAndUpdate(decoded.userId, { refreshToken: null });
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
 
-  res.status(200).json({ success: true, message: 'Logged out successfully' });
+    res.cookie('jwt', '', {
+      httpOnly: true,
+      expires: new Date(0),
+    });
+    res.cookie('refreshToken', '', {
+      httpOnly: true,
+      expires: new Date(0),
+    });
+
+    return res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 const jwt = require('jsonwebtoken');
@@ -311,6 +438,7 @@ const resetPassword = async (req, res) => {
 module.exports = {
   setupPassword,
   loginUser,
+  refreshTokenHandler,
   registerSuperAdmin,
   logoutUser,
   forgotPassword,
