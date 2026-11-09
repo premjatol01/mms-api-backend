@@ -97,6 +97,13 @@ const restaurantSchema = new mongoose.Schema({
     showOnPublicWebsite: { type: Boolean, default: false }
   },
 
+  gstSettings: {
+    enabled: { type: Boolean, default: false },
+    percentage: { type: Number, default: 5 },
+    gstNumber: { type: String, default: '' },
+    chargeType: { type: String, enum: ['exclusive', 'inclusive'], default: 'exclusive' }
+  },
+
   masterMenuSelection: {
     categoryIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MasterCategory' }],
     itemIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MasterItem' }]

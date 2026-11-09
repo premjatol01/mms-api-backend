@@ -136,10 +136,28 @@ async function recalcSessionDoc(sessionId, dbSession = null) {
   const orders = await ordersQuery;
   const liveOrders = orders.filter((o) => o.status !== 'cancelled');
 
+  const restaurant = await Restaurant.findById(session.restaurantId);
+  const isGstEnabled = Boolean(restaurant?.gstSettings?.enabled);
+  const gstPercentage = Number(restaurant?.gstSettings?.percentage ?? 5);
+  const chargeType = restaurant?.gstSettings?.chargeType || 'exclusive';
+
   const subtotal = liveOrders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
   const discount = liveOrders.reduce((sum, o) => sum + (o.discount || 0), 0);
-  const gst = Math.round(subtotal * 0.05);
-  const total = Math.max(0, subtotal + gst - discount);
+
+  let gst = 0;
+  let total = 0;
+  if (isGstEnabled && gstPercentage > 0) {
+    if (chargeType === 'inclusive') {
+      gst = Math.round(Math.max(0, subtotal - discount) * (gstPercentage / (100 + gstPercentage)));
+      total = Math.max(0, subtotal - discount);
+    } else {
+      gst = Math.round(Math.max(0, subtotal - discount) * (gstPercentage / 100));
+      total = Math.max(0, subtotal - discount + gst);
+    }
+  } else {
+    gst = 0;
+    total = Math.max(0, subtotal - discount);
+  }
 
   const orderWithOffer = liveOrders.find((o) => o.appliedOffer);
   if (orderWithOffer && !session.appliedOffer) {
@@ -265,6 +283,7 @@ exports.getPublicTableSession = async (req, res) => {
           name: restaurant.name,
           subdomain: restaurant.website?.subdomain,
           currency: '₹',
+          gstSettings: restaurant.gstSettings || { enabled: false, percentage: 5, chargeType: 'exclusive' },
           settings: {
             isActive: restaurant.settings?.isActive !== false,
             acceptOrders: restaurant.settings?.acceptOrders !== false
@@ -286,7 +305,7 @@ exports.getPublicTableSession = async (req, res) => {
               paymentStatus: activeSession.paymentStatus,
               subtotal: activeSession.subtotal,
               discount: activeSession.discount,
-              gst: activeSession.gst ?? Math.round((activeSession.subtotal || 0) * 0.05),
+              gst: activeSession.gst ?? 0,
               total: activeSession.total,
               customerMobile: activeSession.customerMobile,
               customerName: activeSession.customerName || null,
@@ -1110,6 +1129,9 @@ exports.cancelOrderItems = async (req, res) => {
         comment,
         at: new Date()
       });
+      order.cancelReason = reason;
+      order.cancelComment = comment;
+      order.cancelledAt = new Date();
       recalcOrderDoc(order);
       await order.save();
       await recalcSessionDoc(order.sessionId);
@@ -1257,12 +1279,30 @@ exports.markSessionPaid = async (req, res) => {
       }
     }
 
-    // Recalculate bill amounts strictly following: subtotal + 5% GST - discount
+    // Recalculate bill amounts dynamically based on restaurant's GST settings
+    const restaurant = await Restaurant.findById(session.restaurantId);
+    const isGstEnabled = Boolean(restaurant?.gstSettings?.enabled);
+    const gstPercentage = Number(restaurant?.gstSettings?.percentage ?? 5);
+    const chargeType = restaurant?.gstSettings?.chargeType || 'exclusive';
+
     const liveOrders = orders.filter((o) => o.status !== 'cancelled');
     const subtotal = liveOrders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
     const discount = liveOrders.reduce((sum, o) => sum + (o.discount || 0), 0);
-    const gst = Math.round(subtotal * 0.05);
-    const total = Math.max(0, subtotal + gst - discount);
+
+    let gst = 0;
+    let total = 0;
+    if (isGstEnabled && gstPercentage > 0) {
+      if (chargeType === 'inclusive') {
+        gst = Math.round(Math.max(0, subtotal - discount) * (gstPercentage / (100 + gstPercentage)));
+        total = Math.max(0, subtotal - discount);
+      } else {
+        gst = Math.round(Math.max(0, subtotal - discount) * (gstPercentage / 100));
+        total = Math.max(0, subtotal - discount + gst);
+      }
+    } else {
+      gst = 0;
+      total = Math.max(0, subtotal - discount);
+    }
 
     const now = new Date();
     session.subtotal = subtotal;
@@ -1333,5 +1373,68 @@ exports.markSessionPaid = async (req, res) => {
     if (dbSession) {
       await dbSession.endSession();
     }
+  }
+};
+
+// @route   POST /api/orders/sessions/:sessionId/end
+// @desc    Directly end an active session (e.g. cancelled orders, empty table, or finished table)
+// @access  Protected
+exports.endSessionDirectly = async (req, res) => {
+  try {
+    const session = await Session.findOne({ _id: req.params.sessionId, restaurantId: req.user.restaurantId });
+    if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
+    if (session.status === 'completed') {
+      return res.status(400).json({ success: false, message: 'Session is already completed' });
+    }
+
+    const orders = await Order.find({ sessionId: session._id });
+    for (const order of orders) {
+      if (order.status !== 'cancelled' && order.status !== 'served') {
+        let modified = false;
+        order.items.forEach((item) => {
+          if (!isItemCancelled(item) && item.status !== 'served') {
+            item.status = 'cancelled';
+            item.cancelledQty = item.quantity;
+            modified = true;
+          }
+        });
+        if (modified) {
+          order.cancelReason = order.cancelReason || 'session_ended';
+          order.cancelledAt = new Date();
+          recalcOrderDoc(order);
+          await order.save();
+        }
+      }
+    }
+
+    await recalcSessionDoc(session._id);
+    const updatedSession = await Session.findById(session._id);
+    const now = new Date();
+    updatedSession.status = 'completed';
+    updatedSession.paymentStatus = (updatedSession.total > 0) ? 'successful' : 'not_required';
+    updatedSession.closedAt = now;
+    if (!updatedSession.paidAt && updatedSession.total > 0) {
+      updatedSession.paidAt = now;
+    }
+    await updatedSession.save();
+
+    emitToRestaurant(updatedSession.restaurantId, 'session:completed', {
+      session: updatedSession,
+      tableId: updatedSession.tableId
+    });
+
+    emitToTable(updatedSession.tableId, 'session:completed', {
+      session: updatedSession,
+      tableId: updatedSession.tableId
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Session ended and table freed successfully',
+      data: updatedSession
+    });
+  } catch (error) {
+    console.error('Error ending session directly:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

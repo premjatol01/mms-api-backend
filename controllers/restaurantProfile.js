@@ -98,6 +98,13 @@ const formatProfile = (restaurant, req) => {
       showOnPublicWebsite: r.settings?.showOnPublicWebsite !== undefined ? Boolean(r.settings.showOnPublicWebsite) : false,
     },
 
+    gstSettings: {
+      enabled: r.gstSettings?.enabled !== undefined ? Boolean(r.gstSettings.enabled) : false,
+      percentage: Number(r.gstSettings?.percentage ?? 5),
+      gstNumber: r.gstSettings?.gstNumber || '',
+      chargeType: r.gstSettings?.chargeType || 'exclusive',
+    },
+
     // Read-only subscription info (for the Subscription tab)
     subscription: r.subscription || {},
 

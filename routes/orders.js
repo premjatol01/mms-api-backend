@@ -13,7 +13,8 @@ const {
   updateItemStatus,
   cancelOrderItems,
   serveAllInSession,
-  markSessionPaid
+  markSessionPaid,
+  endSessionDirectly
 } = require('../controllers/orders');
 
 // ─── Public routes (Customer QR Order Portal) ──────────────────────────────
@@ -33,5 +34,6 @@ router.put('/:id/items/:itemId/status', updateItemStatus);
 router.post('/:id/cancel', cancelOrderItems);
 router.post('/sessions/:sessionId/serve-all', serveAllInSession);
 router.post('/sessions/:sessionId/pay', markSessionPaid);
+router.post('/sessions/:sessionId/end', endSessionDirectly);
 
 module.exports = router;

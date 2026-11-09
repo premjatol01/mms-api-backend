@@ -936,7 +936,7 @@ exports.verifyTableSession = async (req, res) => {
           paymentStatus: activeSession.paymentStatus,
           subtotal: activeSession.subtotal,
           discount: activeSession.discount,
-          gst: activeSession.gst ?? Math.round((activeSession.subtotal || 0) * 0.05),
+          gst: activeSession.gst ?? 0,
           total: activeSession.total,
           customerMobile: activeSession.customerMobile,
           customerName: activeSession.customerName || null,

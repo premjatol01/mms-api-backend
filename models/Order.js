@@ -25,10 +25,13 @@ const orderSchema = new mongoose.Schema({
   total: { type: Number, default: 0 },
   appliedOffer: { type: Object, default: null },
   status: { type: String, enum: ['pending', 'processing', 'served', 'partially_cancelled', 'cancelled'], default: 'pending' },
+  cancelReason: { type: String, default: null },
+  cancelComment: { type: String, default: null },
+  cancelledAt: { type: Date, default: null },
   cancellations: [{
     itemId: mongoose.Schema.Types.ObjectId,
     quantity: Number,
-    reason: { type: String, enum: ['customer_request', 'item_unavailable', 'kitchen_issue', 'other'] },
+    reason: { type: String },
     comment: String,
     at: { type: Date, default: Date.now }
   }]
