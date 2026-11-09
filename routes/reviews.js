@@ -5,7 +5,8 @@ const {
   createPublicReview,
   getPublicReviews,
   getAdminReviews,
-  moderateAdminReview
+  moderateAdminReview,
+  togglePortfolioSelection
 } = require('../controllers/reviews');
 
 // ─── Public routes (Table QR Order Portal) ──────────────────────────────────
@@ -17,5 +18,6 @@ router.use(protect);
 
 router.get('/', getAdminReviews);
 router.patch('/:id/status', moderateAdminReview);
+router.patch('/:id/toggle-portfolio', togglePortfolioSelection);
 
 module.exports = router;

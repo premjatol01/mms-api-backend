@@ -227,7 +227,7 @@ exports.getAdminReviews = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Restaurant identifier missing from token' });
     }
 
-    const { status, rating, datePreset, dateFrom, dateTo, tzOffset, page = 1, pageSize = 10 } = req.query;
+    const { status, rating, datePreset, dateFrom, dateTo, tzOffset, portfolioOnly, page = 1, pageSize = 10 } = req.query;
     const restObjId = new mongoose.Types.ObjectId(restaurantId);
 
     const query = { restaurantId: restObjId };
@@ -238,6 +238,10 @@ exports.getAdminReviews = async (req, res) => {
 
     if (rating && String(rating).trim()) {
       query.rating = Number(rating);
+    }
+
+    if (portfolioOnly === 'true' || portfolioOnly === true) {
+      query.selectedForPortfolio = true;
     }
 
     // Timezone offset in minutes (e.g. -330 for UTC+5:30 IST)
@@ -314,7 +318,8 @@ exports.getAdminReviews = async (req, res) => {
             total: { $sum: 1 },
             pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
             accepted: { $sum: { $cond: [{ $eq: ['$status', 'accepted'] }, 1, 0] } },
-            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } }
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+            portfolioSelected: { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'accepted'] }, { $eq: ['$selectedForPortfolio', true] }] }, 1, 0] } }
           }
         }
       ])
@@ -324,8 +329,10 @@ exports.getAdminReviews = async (req, res) => {
       total: 0,
       pending: 0,
       accepted: 0,
-      rejected: 0
+      rejected: 0,
+      portfolioSelected: 0
     };
+    if (stats.portfolioSelected === undefined) stats.portfolioSelected = 0;
     delete stats._id;
 
     const items = reviews.map((r) => ({
@@ -337,7 +344,8 @@ exports.getAdminReviews = async (req, res) => {
       comment: r.comment || '',
       submittedAt: r.submittedAt.toISOString(),
       status: r.status,
-      tableName: r.tableName || ''
+      tableName: r.tableName || '',
+      selectedForPortfolio: Boolean(r.selectedForPortfolio)
     }));
 
     return res.status(200).json({
@@ -401,6 +409,76 @@ exports.moderateAdminReview = async (req, res) => {
     });
   } catch (error) {
     console.error('Error moderating review:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @route   PATCH /api/reviews/:id/toggle-portfolio
+// @desc    Select / unselect an accepted review for the portfolio page (max 5)
+// @access  Private (Restaurant Admin)
+exports.togglePortfolioSelection = async (req, res) => {
+  try {
+    const restaurantId = req.user?.restaurantId || req.restaurant?._id;
+    if (!restaurantId) {
+      return res.status(401).json({ success: false, message: 'Restaurant identifier missing from token' });
+    }
+    const { id } = req.params;
+
+    const review = await CustomerReview.findOne({ _id: id, restaurantId });
+    if (!review) {
+      return res.status(404).json({ success: false, message: 'Review not found.' });
+    }
+
+    if (review.status !== 'accepted') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only accepted reviews can be featured on your portfolio website. Please accept this review first.'
+      });
+    }
+
+    // If currently false and want to set true, check that current portfolio count < 5
+    if (!review.selectedForPortfolio) {
+      const selectedCount = await CustomerReview.countDocuments({
+        restaurantId,
+        status: 'accepted',
+        selectedForPortfolio: true
+      });
+
+      if (selectedCount >= 5) {
+        return res.status(400).json({
+          success: false,
+          message: 'You have already selected 5 top reviews for your portfolio page. Please unselect another review first.'
+        });
+      }
+
+      review.selectedForPortfolio = true;
+    } else {
+      review.selectedForPortfolio = false;
+    }
+
+    await review.save();
+
+    // Also get updated total portfolio count
+    const totalSelected = await CustomerReview.countDocuments({
+      restaurantId,
+      status: 'accepted',
+      selectedForPortfolio: true
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: review.selectedForPortfolio
+        ? 'Review selected for your portfolio website (Top 5).'
+        : 'Review removed from portfolio selection.',
+      data: {
+        id: review._id.toString(),
+        _id: review._id.toString(),
+        selectedForPortfolio: review.selectedForPortfolio,
+        totalSelected
+      }
+    });
+  } catch (error) {
+    console.error('Error toggling portfolio review selection:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

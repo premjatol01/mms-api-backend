@@ -15,6 +15,11 @@ const customerReviewSchema = new mongoose.Schema({
     default: 'pending',
     index: true
   },
+  selectedForPortfolio: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
   submittedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 

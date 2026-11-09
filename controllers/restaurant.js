@@ -719,14 +719,30 @@ exports.getRestaurantPortfolio = async (req, res) => {
     }
 
     // If 'reviews' section is enabled, populate public verified customer reviews and aggregate rating stats
+    // Prioritizes top 5 reviews selected by restaurant admin for the portfolio page
     if (reviewsSec) {
       const CustomerReview = require('../models/CustomerReview');
-      const reviews = await CustomerReview.find({
+
+      // 1. Fetch top reviews explicitly selected for portfolio by restaurant admin (max 5)
+      let reviews = await CustomerReview.find({
         restaurantId: restaurant._id,
-        status: 'accepted'
+        status: 'accepted',
+        selectedForPortfolio: true
       })
-        .sort({ submittedAt: -1 })
-        .limit(20);
+        .sort({ rating: -1, submittedAt: -1 })
+        .limit(5);
+
+      const isCustomSelected = reviews.length > 0;
+
+      // 2. Fallback: If no reviews explicitly selected, display top 5 accepted reviews
+      if (reviews.length === 0) {
+        reviews = await CustomerReview.find({
+          restaurantId: restaurant._id,
+          status: 'accepted'
+        })
+          .sort({ rating: -1, submittedAt: -1 })
+          .limit(5);
+      }
 
       const allStats = await CustomerReview.aggregate([
         { $match: { restaurantId: restaurant._id, status: 'accepted' } },
@@ -747,12 +763,15 @@ exports.getRestaurantPortfolio = async (req, res) => {
         comment: r.comment || '',
         status: r.status,
         tableName: r.tableName || '',
+        selectedForPortfolio: Boolean(r.selectedForPortfolio),
+        isTopPick: Boolean(r.selectedForPortfolio || isCustomSelected),
         createdAt: r.submittedAt ? r.submittedAt.toISOString() : (r.createdAt ? r.createdAt.toISOString() : new Date().toISOString())
       }));
 
       restaurantData.reviewStats = {
         averageRating: allStats[0]?.averageRating ? Number(allStats[0].averageRating.toFixed(1)) : 0,
-        totalReviews: allStats[0]?.totalReviews || 0
+        totalReviews: allStats[0]?.totalReviews || 0,
+        isCustomSelected
       };
     }
 
