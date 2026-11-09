@@ -100,12 +100,26 @@ const DEFAULT_SECTIONS = [
     }
   },
   {
+    sectionId: 'googleReview',
+    type: 'googleReview',
+    title: 'Google Review',
+    description: 'Invite guests to leave a Google review with an interactive banner',
+    enabled: true,
+    order: 5,
+    content: {
+      heading: 'Loved your experience with us?',
+      description: 'Help us grow and let others know about your dining experience by leaving a 5-star review on Google.',
+      buttonText: 'Review Us on Google',
+      googleReviewLink: ''
+    }
+  },
+  {
     sectionId: 'gallery',
     type: 'gallery',
     title: 'Gallery',
     description: 'Photos of your food and restaurant',
     enabled: true,
-    order: 5,
+    order: 6,
     content: {
       title: 'Gallery',
       description: 'A glimpse of our food and ambience',
@@ -118,7 +132,7 @@ const DEFAULT_SECTIONS = [
     title: 'Customer Reviews',
     description: 'Guest ratings and feedback reviews',
     enabled: true,
-    order: 6,
+    order: 7,
     content: {
       title: 'Customer Reviews',
       description: 'What our guests say about their dining experience'
@@ -130,7 +144,7 @@ const DEFAULT_SECTIONS = [
     title: 'Map & Location',
     description: 'Google Maps and restaurant address',
     enabled: true,
-    order: 7,
+    order: 8,
     content: {
       title: 'Find Us',
       description: 'Visit us for lunch or dinner. We would love to see you.',
@@ -155,7 +169,7 @@ const DEFAULT_SECTIONS = [
     title: 'Contact / Inquiry',
     description: 'Customer inquiry form',
     enabled: true,
-    order: 8,
+    order: 9,
     content: {
       title: 'Contact Us',
       description: 'Have a question? Send us an inquiry.',
@@ -175,7 +189,7 @@ const DEFAULT_SECTIONS = [
     title: 'Footer',
     description: 'Footer info, section links, and social media',
     enabled: true,
-    order: 9,
+    order: 10,
     content: {
       title: 'Restaurant Name',
       subtitle: 'Authentic Indian Flavors',
@@ -273,6 +287,9 @@ exports.getWebsiteConfig = async (req, res) => {
           heading: restaurant.name ? `Welcome to ${restaurant.name}` : s.content.heading,
           description: restaurant.shortDescription || restaurant.description || s.content.description,
           imageUrl: restaurant.coverImage ? (restaurant.coverImage.startsWith('http') ? restaurant.coverImage : `http://localhost:5000${restaurant.coverImage}`) : s.content.imageUrl
+        } : s.sectionId === 'googleReview' ? {
+          ...s.content,
+          googleReviewLink: restaurant.googleReviewLink || s.content.googleReviewLink || ''
         } : s.sectionId === 'about' ? {
           ...s.content,
           description: restaurant.shortDescription || restaurant.description || s.content.description,
@@ -355,6 +372,23 @@ exports.getWebsiteConfig = async (req, res) => {
             restaurantId
           });
           sections.push(reviewsDoc);
+          sections.sort((a, b) => a.order - b.order);
+        }
+      }
+
+      const hasGoogleReview = sections.some((s) => s.sectionId === 'googleReview' || s.sectionId === 'google-review' || s.type === 'googleReview');
+      if (!hasGoogleReview) {
+        const defaultGoogleReview = DEFAULT_SECTIONS.find((s) => s.sectionId === 'googleReview');
+        if (defaultGoogleReview) {
+          const googleReviewDoc = await WebsiteSection.create({
+            ...defaultGoogleReview,
+            restaurantId,
+            content: {
+              ...defaultGoogleReview.content,
+              googleReviewLink: restaurant.googleReviewLink || defaultGoogleReview.content.googleReviewLink || ''
+            }
+          });
+          sections.push(googleReviewDoc);
           sections.sort((a, b) => a.order - b.order);
         }
       }
@@ -637,6 +671,14 @@ exports.updateSection = async (req, res) => {
       }
       if (Object.keys(socialUpdates).length > 0) {
         await Restaurant.findByIdAndUpdate(restaurantId, { $set: socialUpdates });
+      }
+    }
+
+    if (sectionId === 'googleReview' && content && typeof content === 'object') {
+      if (content.googleReviewLink !== undefined) {
+        await Restaurant.findByIdAndUpdate(restaurantId, {
+          $set: { googleReviewLink: content.googleReviewLink }
+        });
       }
     }
 

@@ -163,7 +163,7 @@ exports.createPublicReview = async (req, res) => {
 };
 
 // @route   GET /api/reviews/public/:subdomain
-// @desc    Get accepted reviews for public display
+// @desc    Get verified reviews for public display, plus the customer's own reviews if customerMobile is provided
 // @access  Public
 exports.getPublicReviews = async (req, res) => {
   try {
@@ -173,10 +173,28 @@ exports.getPublicReviews = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Restaurant not found' });
     }
 
-    const reviews = await CustomerReview.find({
-      restaurantId: restaurant._id,
-      status: { $ne: 'rejected' }
-    })
+    const rawMobile = req.query.customerMobile || '';
+    const cleanMobile = rawMobile ? String(rawMobile).replace(/\D/g, '').slice(-10) : '';
+
+    let reviewQuery;
+    if (cleanMobile && cleanMobile.length === 10) {
+      // Show all accepted (verified) reviews, PLUS any review submitted by this specific customer
+      reviewQuery = {
+        restaurantId: restaurant._id,
+        $or: [
+          { status: 'accepted' },
+          { customerMobile: cleanMobile }
+        ]
+      };
+    } else {
+      // Public / anonymous users only see accepted (verified) reviews
+      reviewQuery = {
+        restaurantId: restaurant._id,
+        status: 'accepted'
+      };
+    }
+
+    const reviews = await CustomerReview.find(reviewQuery)
       .sort({ submittedAt: -1 })
       .limit(50);
 
@@ -188,6 +206,7 @@ exports.getPublicReviews = async (req, res) => {
         rating: r.rating,
         comment: r.comment || '',
         status: r.status,
+        customerMobile: r.customerMobile,
         tableName: r.tableName || '',
         createdAt: r.submittedAt.toISOString()
       }))
@@ -208,7 +227,7 @@ exports.getAdminReviews = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Restaurant identifier missing from token' });
     }
 
-    const { status, rating, dateFrom, dateTo, page = 1, pageSize = 10 } = req.query;
+    const { status, rating, datePreset, dateFrom, dateTo, tzOffset, page = 1, pageSize = 10 } = req.query;
     const restObjId = new mongoose.Types.ObjectId(restaurantId);
 
     const query = { restaurantId: restObjId };
@@ -221,13 +240,58 @@ exports.getAdminReviews = async (req, res) => {
       query.rating = Number(rating);
     }
 
-    if ((dateFrom && dateFrom.trim()) || (dateTo && dateTo.trim())) {
+    // Timezone offset in minutes (e.g. -330 for UTC+5:30 IST)
+    const offsetMinutes = tzOffset !== undefined && tzOffset !== '' ? parseInt(tzOffset, 10) : -330;
+
+    if (datePreset === 'today') {
+      const now = new Date();
+      // Calculate local midnight in client timezone
+      const localNow = new Date(now.getTime() - offsetMinutes * 60 * 1000);
+      const y = localNow.getUTCFullYear();
+      const m = localNow.getUTCMonth();
+      const d = localNow.getUTCDate();
+      const startMs = Date.UTC(y, m, d) + offsetMinutes * 60 * 1000;
+      const endMs = Date.UTC(y, m, d, 23, 59, 59, 999) + offsetMinutes * 60 * 1000;
+      query.submittedAt = { $gte: new Date(startMs), $lte: new Date(endMs) };
+    } else if (datePreset === 'yesterday') {
+      const now = new Date();
+      const localNow = new Date(now.getTime() - offsetMinutes * 60 * 1000);
+      localNow.setUTCDate(localNow.getUTCDate() - 1);
+      const y = localNow.getUTCFullYear();
+      const m = localNow.getUTCMonth();
+      const d = localNow.getUTCDate();
+      const startMs = Date.UTC(y, m, d) + offsetMinutes * 60 * 1000;
+      const endMs = Date.UTC(y, m, d, 23, 59, 59, 999) + offsetMinutes * 60 * 1000;
+      query.submittedAt = { $gte: new Date(startMs), $lte: new Date(endMs) };
+    } else if ((dateFrom && dateFrom.trim()) || (dateTo && dateTo.trim())) {
       query.submittedAt = {};
       if (dateFrom && dateFrom.trim()) {
-        query.submittedAt.$gte = new Date(`${dateFrom.trim()}T00:00:00.000Z`);
+        const str = dateFrom.trim();
+        if (str.includes('T')) {
+          query.submittedAt.$gte = new Date(str);
+        } else {
+          const [y, m, d] = str.split('-').map(Number);
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            const startMs = Date.UTC(y, m - 1, d) + offsetMinutes * 60 * 1000;
+            query.submittedAt.$gte = new Date(startMs);
+          } else {
+            query.submittedAt.$gte = new Date(`${str}T00:00:00.000Z`);
+          }
+        }
       }
       if (dateTo && dateTo.trim()) {
-        query.submittedAt.$lte = new Date(`${dateTo.trim()}T23:59:59.999Z`);
+        const str = dateTo.trim();
+        if (str.includes('T')) {
+          query.submittedAt.$lte = new Date(str);
+        } else {
+          const [y, m, d] = str.split('-').map(Number);
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            const endMs = Date.UTC(y, m - 1, d, 23, 59, 59, 999) + offsetMinutes * 60 * 1000;
+            query.submittedAt.$lte = new Date(endMs);
+          } else {
+            query.submittedAt.$lte = new Date(`${str}T23:59:59.999Z`);
+          }
+        }
       }
     }
 

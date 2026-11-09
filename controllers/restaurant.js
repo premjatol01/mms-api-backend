@@ -562,13 +562,39 @@ exports.getRestaurantPortfolio = async (req, res) => {
           type: 'reviews',
           title: 'Customer Reviews',
           enabled: true,
-          order: 6,
+          order: 7,
           content: {
             title: 'Customer Reviews',
             description: 'What our guests say about their dining experience'
           }
         };
         sections = [...sections, reviewsSec];
+        sections.sort((a, b) => a.order - b.order);
+      }
+    }
+
+    // Check if googleReview is present in enabled sections
+    let googleReviewSec = sections.find((s) => s.sectionId === 'googleReview' || s.sectionId === 'google-review' || s.type === 'googleReview');
+    if (!googleReviewSec) {
+      const dbGoogleReview = await WebsiteSection.findOne({
+        restaurantId: restaurant._id,
+        sectionId: { $in: ['googleReview', 'google-review'] }
+      });
+      if (!dbGoogleReview && restaurant.googleReviewLink) {
+        googleReviewSec = {
+          sectionId: 'googleReview',
+          type: 'googleReview',
+          title: 'Google Review',
+          enabled: true,
+          order: 5,
+          content: {
+            heading: 'Loved your experience with us?',
+            description: 'Help us grow and let others know about your dining experience by leaving a 5-star review on Google.',
+            buttonText: 'Review Us on Google',
+            googleReviewLink: restaurant.googleReviewLink || ''
+          }
+        };
+        sections = [...sections, googleReviewSec];
         sections.sort((a, b) => a.order - b.order);
       }
     }
@@ -692,18 +718,18 @@ exports.getRestaurantPortfolio = async (req, res) => {
       restaurantData.activeOffers = activeOffers;
     }
 
-    // If 'reviews' section is enabled, populate public customer reviews and aggregate rating stats
+    // If 'reviews' section is enabled, populate public verified customer reviews and aggregate rating stats
     if (reviewsSec) {
       const CustomerReview = require('../models/CustomerReview');
       const reviews = await CustomerReview.find({
         restaurantId: restaurant._id,
-        status: { $ne: 'rejected' }
+        status: 'accepted'
       })
         .sort({ submittedAt: -1 })
         .limit(20);
 
       const allStats = await CustomerReview.aggregate([
-        { $match: { restaurantId: restaurant._id, status: { $ne: 'rejected' } } },
+        { $match: { restaurantId: restaurant._id, status: 'accepted' } },
         {
           $group: {
             _id: null,
