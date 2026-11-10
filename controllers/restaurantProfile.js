@@ -198,54 +198,81 @@ const updateProfile = async (req, res) => {
     // Remap `address` → `detailedAddress` and keep basic `address` in sync
     if (body.address) {
       const addrObj = body.address;
-      body.detailedAddress = addrObj;
+      const line1 = addrObj.line1 !== undefined ? addrObj.line1 : (addrObj.houseNumber || '');
+      const line2 = addrObj.line2 !== undefined ? addrObj.line2 : (addrObj.street || '');
+      const area = addrObj.area || '';
+      const landmark = addrObj.landmark || '';
+      const city = addrObj.city || '';
+      const state = addrObj.state || '';
+      const pincode = addrObj.pincode || '';
+      const country = addrObj.country || 'India';
+
+      body.detailedAddress = {
+        line1,
+        line2,
+        area,
+        landmark,
+        city,
+        state,
+        pincode,
+        country
+      };
+
       const fullAddress = [
-        addrObj.line1,
-        addrObj.line2,
-        addrObj.area,
-        addrObj.landmark ? `Near ${addrObj.landmark}` : null,
-        addrObj.city,
-        addrObj.state,
-        addrObj.pincode,
-        addrObj.country || 'India'
+        line1,
+        line2,
+        area,
+        landmark ? `Near ${landmark}` : null,
+        city,
+        state,
+        pincode,
+        country
       ].filter(Boolean).join(', ');
 
       body.address = {
         fullAddress,
-        city: addrObj.city || '',
-        state: addrObj.state || '',
-        pincode: addrObj.pincode || '',
-        country: addrObj.country || 'India'
+        city,
+        state,
+        pincode,
+        country
       };
 
       // Also sync to WebsiteSection ('map')
       try {
         const WebsiteSection = require('../models/WebsiteSection');
-        WebsiteSection.findOneAndUpdate(
-          { restaurantId: req.user.restaurantId, sectionId: 'map' },
-          {
-            $set: {
-              'content.location.houseNumber': addrObj.line1 || '',
-              'content.location.street': addrObj.line2 || '',
-              'content.location.area': addrObj.area || '',
-              'content.location.landmark': addrObj.landmark || '',
-              'content.location.city': addrObj.city || '',
-              'content.location.state': addrObj.state || '',
-              'content.location.pincode': addrObj.pincode || '',
-              'content.location.country': addrObj.country || 'India',
-              'content.location.addressLine': fullAddress,
-              'draftContent.location.houseNumber': addrObj.line1 || '',
-              'draftContent.location.street': addrObj.line2 || '',
-              'draftContent.location.area': addrObj.area || '',
-              'draftContent.location.landmark': addrObj.landmark || '',
-              'draftContent.location.city': addrObj.city || '',
-              'draftContent.location.state': addrObj.state || '',
-              'draftContent.location.pincode': addrObj.pincode || '',
-              'draftContent.location.country': addrObj.country || 'India',
-              'draftContent.location.addressLine': fullAddress
+        const mapSec = await WebsiteSection.findOne({ restaurantId: req.user.restaurantId, sectionId: 'map' });
+        if (mapSec) {
+          const locPayload = {
+            houseNumber: line1,
+            line1: line1,
+            street: line2,
+            line2: line2,
+            area,
+            landmark,
+            city,
+            state,
+            pincode,
+            country,
+            addressLine: fullAddress
+          };
+          mapSec.content = {
+            ...(mapSec.content || {}),
+            location: {
+              ...(mapSec.content?.location || {}),
+              ...locPayload
             }
+          };
+          if (mapSec.draftContent) {
+            mapSec.draftContent = {
+              ...mapSec.draftContent,
+              location: {
+                ...(mapSec.draftContent.location || {}),
+                ...locPayload
+              }
+            };
           }
-        ).catch(() => {});
+          await mapSec.save();
+        }
       } catch (secErr) {
         console.error('Error syncing address to map section:', secErr);
       }
@@ -498,9 +525,22 @@ const syncMasterMenuSelection = async (req, res) => {
           restaurantId,
           masterCategoryId: mCat._id,
           name: mCat.name,
-          description: mCat.description,
+          description: mCat.description || '',
           image: mCat.image
         });
+      } else {
+        let catUpdated = false;
+        if ((!localCat.description || localCat.description.trim() === '') && mCat.description) {
+          localCat.description = mCat.description;
+          catUpdated = true;
+        }
+        if (!localCat.image && mCat.image) {
+          localCat.image = mCat.image;
+          catUpdated = true;
+        }
+        if (catUpdated) {
+          await localCat.save();
+        }
       }
       syncedCategoryIds.set(mCat._id.toString(), localCat._id);
     }
@@ -516,11 +556,29 @@ const syncMasterMenuSelection = async (req, res) => {
           categoryId: localCatId,
           masterItemId: mItem._id,
           name: mItem.name,
-          description: '', 
+          description: mItem.description || '', 
           price: 0, 
           image: mItem.image,
           status: 'available'
         });
+      } else {
+        let itemUpdated = false;
+        // If local item has empty or missing description, populate it from master item
+        if ((!localItem.description || localItem.description.trim() === '') && mItem.description) {
+          localItem.description = mItem.description;
+          itemUpdated = true;
+        }
+        if (!localItem.image && mItem.image) {
+          localItem.image = mItem.image;
+          itemUpdated = true;
+        }
+        if (localCatId && (!localItem.categoryId || localItem.categoryId.toString() !== localCatId.toString())) {
+          localItem.categoryId = localCatId;
+          itemUpdated = true;
+        }
+        if (itemUpdated) {
+          await localItem.save();
+        }
       }
     }
 

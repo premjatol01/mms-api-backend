@@ -51,6 +51,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/master-menu', masterMenuRoutes);
 app.use('/api/platform-settings', platformSettingsRoutes);
 app.use('/api/restaurants', restaurantRoutes);
+app.use('/api/super-admin/profile', require('./routes/superAdminProfile'));
+app.use('/api/restaurant/account', require('./routes/account'));
 app.use('/api/restaurant/website', require('./routes/website'));
 app.use('/api/restaurant/tables', require('./routes/restaurantTables'));
 app.use('/api/restaurant/subscription', require('./routes/restaurantSubscription'));

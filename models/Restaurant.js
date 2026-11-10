@@ -11,7 +11,17 @@ const restaurantSchema = new mongoose.Schema({
   admin: {
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true, sparse: true },
-    phone: { type: String, required: true }
+    phone: { type: String, required: true },
+    personalAddress: {
+      line1: { type: String, default: '' },
+      line2: { type: String, default: '' },
+      area: { type: String, default: '' },
+      landmark: { type: String, default: '' },
+      city: { type: String, default: '' },
+      state: { type: String, default: '' },
+      country: { type: String, default: 'India' },
+      pincode: { type: String, default: '' }
+    }
   },
   address: {
     fullAddress: { type: String },

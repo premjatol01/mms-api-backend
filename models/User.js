@@ -13,6 +13,16 @@ const userSchema = new mongoose.Schema({
   restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', default: null },
   mobile: { type: String },
   mobileVerified: { type: Boolean, default: false },
+  personalAddress: {
+    line1: { type: String, default: '' },
+    line2: { type: String, default: '' },
+    area: { type: String, default: '' },
+    landmark: { type: String, default: '' },
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    country: { type: String, default: 'India' },
+    pincode: { type: String, default: '' }
+  },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' },
   refreshToken: { type: String, default: null },
   resetPasswordToken: { type: String },

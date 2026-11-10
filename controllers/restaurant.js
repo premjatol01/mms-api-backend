@@ -102,8 +102,51 @@ exports.createRestaurant = async (req, res) => {
     // Parse nested objects that might be stringified if using form-data
     if (typeof data.admin === 'string') data.admin = JSON.parse(data.admin);
     if (typeof data.address === 'string') data.address = JSON.parse(data.address);
+    if (typeof data.detailedAddress === 'string') data.detailedAddress = JSON.parse(data.detailedAddress);
     if (typeof data.subscription === 'string') data.subscription = JSON.parse(data.subscription);
     if (typeof data.contact === 'string') data.contact = JSON.parse(data.contact);
+
+    // Normalize detailedAddress & address
+    const detailed = data.detailedAddress || {};
+    const legacyAddr = data.address || {};
+    const line1 = detailed.line1 !== undefined ? detailed.line1 : (detailed.houseNumber !== undefined ? detailed.houseNumber : (legacyAddr.line1 || legacyAddr.houseNumber || ''));
+    const line2 = detailed.line2 !== undefined ? detailed.line2 : (detailed.street !== undefined ? detailed.street : (legacyAddr.line2 || legacyAddr.street || ''));
+    const area = detailed.area !== undefined ? detailed.area : (legacyAddr.area || '');
+    const landmark = detailed.landmark !== undefined ? detailed.landmark : (legacyAddr.landmark || '');
+    const city = detailed.city !== undefined ? detailed.city : (legacyAddr.city || '');
+    const state = detailed.state !== undefined ? detailed.state : (legacyAddr.state || '');
+    const pincode = detailed.pincode !== undefined ? detailed.pincode : (legacyAddr.pincode || '');
+    const country = detailed.country !== undefined ? detailed.country : (legacyAddr.country || 'India');
+
+    const fullAddress = legacyAddr.fullAddress || [
+      line1,
+      line2,
+      area,
+      landmark ? `Near ${landmark}` : '',
+      city,
+      state,
+      pincode,
+      country
+    ].filter(Boolean).join(', ');
+
+    data.detailedAddress = {
+      line1,
+      line2,
+      area,
+      landmark,
+      city,
+      state,
+      pincode,
+      country
+    };
+
+    data.address = {
+      fullAddress,
+      city,
+      state,
+      pincode,
+      country
+    };
 
     // 1. Sanitize & Normalize Contact Information (strictly 10-digit phone, no country code)
     const cleanRestaurantPhone = sanitizeMobile(data.phone || data.contact?.primaryPhone);
@@ -197,6 +240,7 @@ exports.createRestaurant = async (req, res) => {
       mobile: data.admin.phone,
       role: 'restaurant_admin',
       restaurantId: restaurant._id,
+      personalAddress: data.admin.personalAddress || {},
       status: 'inactive'
     });
 
@@ -239,11 +283,96 @@ exports.updateRestaurant = async (req, res) => {
     
     if (typeof data.admin === 'string') data.admin = JSON.parse(data.admin);
     if (typeof data.address === 'string') data.address = JSON.parse(data.address);
+    if (typeof data.detailedAddress === 'string') data.detailedAddress = JSON.parse(data.detailedAddress);
     if (typeof data.subscription === 'string') data.subscription = JSON.parse(data.subscription);
     if (typeof data.contact === 'string') data.contact = JSON.parse(data.contact);
 
     const existingRestaurant = await Restaurant.findById(req.params.id);
     if (!existingRestaurant) return res.status(404).json({ success: false, message: 'Restaurant not found' });
+
+    // Normalize detailedAddress & address if provided
+    if (data.address !== undefined || data.detailedAddress !== undefined) {
+      const detailed = data.detailedAddress || {};
+      const legacyAddr = data.address || {};
+      const line1 = detailed.line1 !== undefined ? detailed.line1 : (detailed.houseNumber !== undefined ? detailed.houseNumber : legacyAddr.line1 || legacyAddr.houseNumber || existingRestaurant.detailedAddress?.line1 || '');
+      const line2 = detailed.line2 !== undefined ? detailed.line2 : (detailed.street !== undefined ? detailed.street : legacyAddr.line2 || legacyAddr.street || existingRestaurant.detailedAddress?.line2 || '');
+      const area = detailed.area !== undefined ? detailed.area : (legacyAddr.area !== undefined ? legacyAddr.area : existingRestaurant.detailedAddress?.area || '');
+      const landmark = detailed.landmark !== undefined ? detailed.landmark : (legacyAddr.landmark !== undefined ? legacyAddr.landmark : existingRestaurant.detailedAddress?.landmark || '');
+      const city = detailed.city || legacyAddr.city || existingRestaurant.detailedAddress?.city || existingRestaurant.address?.city || '';
+      const state = detailed.state || legacyAddr.state || existingRestaurant.detailedAddress?.state || existingRestaurant.address?.state || '';
+      const pincode = detailed.pincode || legacyAddr.pincode || existingRestaurant.detailedAddress?.pincode || existingRestaurant.address?.pincode || '';
+      const country = detailed.country || legacyAddr.country || existingRestaurant.detailedAddress?.country || existingRestaurant.address?.country || 'India';
+
+      const fullAddress = [
+        line1,
+        line2,
+        area,
+        landmark ? `Near ${landmark}` : '',
+        city,
+        state,
+        pincode,
+        country
+      ].filter(Boolean).join(', ');
+
+      data.detailedAddress = {
+        line1,
+        line2,
+        area,
+        landmark,
+        city,
+        state,
+        pincode,
+        country
+      };
+
+      data.address = {
+        fullAddress,
+        city,
+        state,
+        pincode,
+        country
+      };
+
+      // Also sync simultaneously to WebsiteSection ('map')
+      try {
+        const WebsiteSection = require('../models/WebsiteSection');
+        const mapSec = await WebsiteSection.findOne({ restaurantId: existingRestaurant._id, sectionId: 'map' });
+        if (mapSec) {
+          const locPayload = {
+            houseNumber: line1,
+            line1: line1,
+            street: line2,
+            line2: line2,
+            area,
+            landmark,
+            city,
+            state,
+            pincode,
+            country,
+            addressLine: fullAddress
+          };
+          mapSec.content = {
+            ...(mapSec.content || {}),
+            location: {
+              ...(mapSec.content?.location || {}),
+              ...locPayload
+            }
+          };
+          if (mapSec.draftContent) {
+            mapSec.draftContent = {
+              ...mapSec.draftContent,
+              location: {
+                ...(mapSec.draftContent.location || {}),
+                ...locPayload
+              }
+            };
+          }
+          await mapSec.save();
+        }
+      } catch (secErr) {
+        console.error('Error syncing address to map section from super admin:', secErr);
+      }
+    }
 
     // 1. Sanitize & Normalize Contact Information
     if (data.phone !== undefined || data.contact?.primaryPhone !== undefined) {
@@ -297,7 +426,8 @@ exports.updateRestaurant = async (req, res) => {
             name: data.admin.name,
             email: data.admin.email,
             phone: data.admin.phone,
-            mobile: data.admin.phone
+            mobile: data.admin.phone,
+            ...(data.admin.personalAddress !== undefined ? { personalAddress: data.admin.personalAddress } : {})
           }
         }
       );

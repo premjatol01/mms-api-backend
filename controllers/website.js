@@ -447,6 +447,45 @@ exports.getWebsiteConfig = async (req, res) => {
       content: s.draftContent !== null && s.draftContent !== undefined ? s.draftContent : s.content
     }));
 
+    // Keep map section in sync with restaurant.detailedAddress ONLY if there is NO pending draft for map
+    const da = restaurant.detailedAddress;
+    const rawMapSec = sections.find((s) => s.sectionId === 'map');
+    const hasMapDraft = rawMapSec && rawMapSec.draftContent !== null && rawMapSec.draftContent !== undefined;
+
+    if (da && !hasMapDraft) {
+      const houseNumber = da.line1 || '';
+      const street = da.line2 !== undefined ? da.line2 : '';
+      const area = da.area || '';
+      const landmark = da.landmark || '';
+      const city = da.city || restaurant.address?.city || '';
+      const state = da.state || restaurant.address?.state || '';
+      const pincode = da.pincode || restaurant.address?.pincode || '';
+      const country = da.country || restaurant.address?.country || 'India';
+      const fullAddress = [houseNumber, street, area, landmark ? `Near ${landmark}` : '', city, state, pincode, country].filter(Boolean).join(', ');
+
+      const mapSecIndex = formattedSections.findIndex((s) => s.id === 'map');
+      if (mapSecIndex !== -1) {
+        const curLoc = formattedSections[mapSecIndex].content?.location || {};
+        formattedSections[mapSecIndex].content = {
+          ...(formattedSections[mapSecIndex].content || {}),
+          location: {
+            ...curLoc,
+            houseNumber,
+            line1: houseNumber,
+            street,
+            line2: street,
+            area,
+            landmark,
+            city,
+            state,
+            pincode,
+            country,
+            addressLine: fullAddress
+          }
+        };
+      }
+    }
+
     const configData = config.toObject ? config.toObject() : { ...config };
     if (!configData.restaurantSlug && restaurant.website?.subdomain) {
       configData.restaurantSlug = restaurant.website.subdomain;
@@ -576,32 +615,41 @@ exports.publishWebsite = async (req, res) => {
 
         if (sectionId === 'map' && liveContent?.location) {
           const loc = liveContent.location;
+          const houseNumber = loc.houseNumber !== undefined ? loc.houseNumber : (loc.line1 !== undefined ? loc.line1 : '');
+          const street = loc.street !== undefined ? loc.street : (loc.line2 !== undefined ? loc.line2 : '');
+          const area = loc.area !== undefined ? loc.area : '';
+          const landmark = loc.landmark !== undefined ? loc.landmark : '';
+          const city = loc.city !== undefined ? loc.city : '';
+          const state = loc.state !== undefined ? loc.state : '';
+          const pincode = loc.pincode !== undefined ? loc.pincode : '';
+          const country = loc.country !== undefined ? loc.country : 'India';
+
           const fullAddr = [
-            loc.houseNumber || loc.line1,
-            loc.street || loc.line2 || loc.addressLine,
-            loc.area,
-            loc.landmark ? `Near ${loc.landmark}` : '',
-            loc.city,
-            loc.state,
-            loc.pincode,
-            loc.country || 'India'
+            houseNumber,
+            street,
+            area,
+            landmark ? `Near ${landmark}` : '',
+            city,
+            state,
+            pincode,
+            country
           ].filter(Boolean).join(', ');
 
           await Restaurant.findByIdAndUpdate(restaurantId, {
             $set: {
-              'detailedAddress.line1': loc.houseNumber || loc.line1 || '',
-              'detailedAddress.line2': loc.street || loc.line2 || loc.addressLine || '',
-              'detailedAddress.area': loc.area || '',
-              'detailedAddress.landmark': loc.landmark || '',
-              'detailedAddress.city': loc.city || '',
-              'detailedAddress.state': loc.state || '',
-              'detailedAddress.pincode': loc.pincode || '',
-              'detailedAddress.country': loc.country || 'India',
+              'detailedAddress.line1': houseNumber,
+              'detailedAddress.line2': street,
+              'detailedAddress.area': area,
+              'detailedAddress.landmark': landmark,
+              'detailedAddress.city': city,
+              'detailedAddress.state': state,
+              'detailedAddress.pincode': pincode,
+              'detailedAddress.country': country,
               'address.fullAddress': fullAddr,
-              'address.city': loc.city || '',
-              'address.state': loc.state || '',
-              'address.pincode': loc.pincode || '',
-              'address.country': loc.country || 'India'
+              'address.city': city,
+              'address.state': state,
+              'address.pincode': pincode,
+              'address.country': country
             }
           });
         }
@@ -838,42 +886,6 @@ exports.updateSection = async (req, res) => {
       { $set: updateFields },
       { new: true, upsert: true }
     );
-
-    if (sectionId === 'map' && content?.location) {
-      const loc = content.location;
-      const fullAddr = [
-        loc.houseNumber || loc.line1,
-        loc.street || loc.line2 || loc.addressLine,
-        loc.area,
-        loc.landmark ? `Near ${loc.landmark}` : '',
-        loc.city,
-        loc.state,
-        loc.pincode,
-        loc.country || 'India'
-      ].filter(Boolean).join(', ');
-
-      await Restaurant.findByIdAndUpdate(restaurantId, {
-        $set: {
-          'detailedAddress.line1': loc.houseNumber || loc.line1 || '',
-          'detailedAddress.line2': loc.street || loc.line2 || loc.addressLine || '',
-          'detailedAddress.area': loc.area || '',
-          'detailedAddress.landmark': loc.landmark || '',
-          'detailedAddress.city': loc.city || '',
-          'detailedAddress.state': loc.state || '',
-          'detailedAddress.pincode': loc.pincode || '',
-          'detailedAddress.country': loc.country || 'India',
-          'address.fullAddress': fullAddr,
-          'address.city': loc.city || '',
-          'address.state': loc.state || '',
-          'address.pincode': loc.pincode || '',
-          'address.country': loc.country || 'India'
-        }
-      });
-    }
-
-    if (sectionId === 'hours' && Array.isArray(content?.businessHours)) {
-      await Restaurant.findByIdAndUpdate(restaurantId, { $set: { businessHours: content.businessHours } });
-    }
 
     // Mark config as having a draft
     await WebsiteConfig.findOneAndUpdate(
