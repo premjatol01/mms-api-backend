@@ -73,6 +73,36 @@ exports.updateCategory = async (req, res) => {
       { new: true, runValidators: true }
     );
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
+
+    // If top category status changed, sync to website Popular Menu section
+    if (req.body.isTopCategory !== undefined) {
+      try {
+        const allTop = await MenuCategory.find({
+          restaurantId: req.user.restaurantId,
+          isTopCategory: true
+        }).sort({ displayOrder: 1, createdAt: 1 }).limit(5);
+
+        const topCategoryIds = allTop.map((c) => c._id.toString());
+        const WebsiteSection = require('../models/WebsiteSection');
+        const WebsiteConfig = require('../models/WebsiteConfig');
+        await WebsiteSection.findOneAndUpdate(
+          { restaurantId: req.user.restaurantId, sectionId: 'menu' },
+          {
+            $set: {
+              'content.categoryIds': topCategoryIds,
+              'draftContent.categoryIds': topCategoryIds
+            }
+          }
+        );
+        await WebsiteConfig.findOneAndUpdate(
+          { restaurantId: req.user.restaurantId },
+          { $set: { hasDraft: true } }
+        );
+      } catch (syncErr) {
+        console.error('Error syncing top categories to website section:', syncErr);
+      }
+    }
+
     res.json({ success: true, data: category });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error updating category' });
@@ -101,6 +131,27 @@ exports.setTopCategories = async (req, res) => {
         { restaurantId: req.user.restaurantId, _id: categoryIds[i] },
         { $set: { isTopCategory: true, displayOrder: i + 1 } }
       );
+    }
+
+    // Sync to WebsiteSection ('menu') so Website > Popular Menu section immediately reflects top categories
+    try {
+      const WebsiteSection = require('../models/WebsiteSection');
+      const WebsiteConfig = require('../models/WebsiteConfig');
+      await WebsiteSection.findOneAndUpdate(
+        { restaurantId: req.user.restaurantId, sectionId: 'menu' },
+        {
+          $set: {
+            'content.categoryIds': categoryIds,
+            'draftContent.categoryIds': categoryIds
+          }
+        }
+      );
+      await WebsiteConfig.findOneAndUpdate(
+        { restaurantId: req.user.restaurantId },
+        { $set: { hasDraft: true } }
+      );
+    } catch (syncErr) {
+      console.error('Error syncing top categories in setTopCategories:', syncErr);
     }
 
     const updatedCategories = await MenuCategory.find({

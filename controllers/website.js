@@ -139,6 +139,27 @@ const DEFAULT_SECTIONS = [
     }
   },
   {
+    sectionId: 'hours',
+    type: 'hours',
+    title: 'Business Hours',
+    description: 'Opening days and operational time slots',
+    enabled: true,
+    order: 8,
+    content: {
+      title: 'Opening Hours',
+      description: 'Visit us during our operating hours. We look forward to serving you.',
+      businessHours: [
+        { day: 'Monday', isOpen: true, slots: [{ open: '10:00', close: '23:00' }] },
+        { day: 'Tuesday', isOpen: true, slots: [{ open: '10:00', close: '23:00' }] },
+        { day: 'Wednesday', isOpen: true, slots: [{ open: '10:00', close: '23:00' }] },
+        { day: 'Thursday', isOpen: true, slots: [{ open: '10:00', close: '23:00' }] },
+        { day: 'Friday', isOpen: true, slots: [{ open: '10:00', close: '23:00' }] },
+        { day: 'Saturday', isOpen: true, slots: [{ open: '10:00', close: '23:00' }] },
+        { day: 'Sunday', isOpen: true, slots: [{ open: '10:00', close: '23:00' }] }
+      ]
+    }
+  },
+  {
     sectionId: 'map',
     type: 'map',
     title: 'Map & Location',
@@ -376,6 +397,25 @@ exports.getWebsiteConfig = async (req, res) => {
         }
       }
 
+      const hasHours = sections.some((s) => s.sectionId === 'hours' || s.type === 'hours');
+      if (!hasHours) {
+        const defaultHours = DEFAULT_SECTIONS.find((s) => s.sectionId === 'hours');
+        if (defaultHours) {
+          const hoursDoc = await WebsiteSection.create({
+            ...defaultHours,
+            restaurantId,
+            content: {
+              ...defaultHours.content,
+              businessHours: (restaurant.businessHours && restaurant.businessHours.length === 7)
+                ? restaurant.businessHours
+                : defaultHours.content.businessHours
+            }
+          });
+          sections.push(hoursDoc);
+          sections.sort((a, b) => a.order - b.order);
+        }
+      }
+
       const hasGoogleReview = sections.some((s) => s.sectionId === 'googleReview' || s.sectionId === 'google-review' || s.type === 'googleReview');
       if (!hasGoogleReview) {
         const defaultGoogleReview = DEFAULT_SECTIONS.find((s) => s.sectionId === 'googleReview');
@@ -534,6 +574,42 @@ exports.publishWebsite = async (req, res) => {
           await Restaurant.findByIdAndUpdate(restaurantId, { $set: { googleReviewLink: liveContent.googleReviewLink } });
         }
 
+        if (sectionId === 'map' && liveContent?.location) {
+          const loc = liveContent.location;
+          const fullAddr = [
+            loc.houseNumber || loc.line1,
+            loc.street || loc.line2 || loc.addressLine,
+            loc.area,
+            loc.landmark ? `Near ${loc.landmark}` : '',
+            loc.city,
+            loc.state,
+            loc.pincode,
+            loc.country || 'India'
+          ].filter(Boolean).join(', ');
+
+          await Restaurant.findByIdAndUpdate(restaurantId, {
+            $set: {
+              'detailedAddress.line1': loc.houseNumber || loc.line1 || '',
+              'detailedAddress.line2': loc.street || loc.line2 || loc.addressLine || '',
+              'detailedAddress.area': loc.area || '',
+              'detailedAddress.landmark': loc.landmark || '',
+              'detailedAddress.city': loc.city || '',
+              'detailedAddress.state': loc.state || '',
+              'detailedAddress.pincode': loc.pincode || '',
+              'detailedAddress.country': loc.country || 'India',
+              'address.fullAddress': fullAddr,
+              'address.city': loc.city || '',
+              'address.state': loc.state || '',
+              'address.pincode': loc.pincode || '',
+              'address.country': loc.country || 'India'
+            }
+          });
+        }
+
+        if (sectionId === 'hours' && Array.isArray(liveContent?.businessHours)) {
+          await Restaurant.findByIdAndUpdate(restaurantId, { $set: { businessHours: liveContent.businessHours } });
+        }
+
         if (sectionId === 'menu' && Array.isArray(liveContent?.categoryIds) && liveContent.categoryIds.length > 0) {
           const MenuCategory = require('../models/MenuCategory');
           const catIds = liveContent.categoryIds.slice(0, 5);
@@ -678,6 +754,26 @@ exports.getSections = async (req, res) => {
       }
     }
 
+    const hasHours = sections.some((s) => s.sectionId === 'hours' || s.type === 'hours');
+    if (!hasHours && sections.length > 0) {
+      const restaurant = await Restaurant.findById(restaurantId);
+      const defaultHours = DEFAULT_SECTIONS.find((s) => s.sectionId === 'hours');
+      if (defaultHours) {
+        const hoursDoc = await WebsiteSection.create({
+          ...defaultHours,
+          restaurantId,
+          content: {
+            ...defaultHours.content,
+            businessHours: (restaurant?.businessHours && restaurant.businessHours.length === 7)
+              ? restaurant.businessHours
+              : defaultHours.content.businessHours
+          }
+        });
+        sections.push(hoursDoc);
+        sections.sort((a, b) => a.order - b.order);
+      }
+    }
+
     const formatted = sections.map((s) => ({
       id: s.sectionId,
       _id: s._id,
@@ -727,6 +823,8 @@ exports.updateSection = async (req, res) => {
     let { content, title, description, enabled } = req.body;
 
     if (content !== undefined) content = processContent(content, restaurantId);
+    if (title === undefined && content?.title) title = content.title;
+    if (description === undefined && content?.description) description = content.description;
 
     // Save as draft — does NOT touch live `content` field
     const updateFields = {};
@@ -740,6 +838,42 @@ exports.updateSection = async (req, res) => {
       { $set: updateFields },
       { new: true, upsert: true }
     );
+
+    if (sectionId === 'map' && content?.location) {
+      const loc = content.location;
+      const fullAddr = [
+        loc.houseNumber || loc.line1,
+        loc.street || loc.line2 || loc.addressLine,
+        loc.area,
+        loc.landmark ? `Near ${loc.landmark}` : '',
+        loc.city,
+        loc.state,
+        loc.pincode,
+        loc.country || 'India'
+      ].filter(Boolean).join(', ');
+
+      await Restaurant.findByIdAndUpdate(restaurantId, {
+        $set: {
+          'detailedAddress.line1': loc.houseNumber || loc.line1 || '',
+          'detailedAddress.line2': loc.street || loc.line2 || loc.addressLine || '',
+          'detailedAddress.area': loc.area || '',
+          'detailedAddress.landmark': loc.landmark || '',
+          'detailedAddress.city': loc.city || '',
+          'detailedAddress.state': loc.state || '',
+          'detailedAddress.pincode': loc.pincode || '',
+          'detailedAddress.country': loc.country || 'India',
+          'address.fullAddress': fullAddr,
+          'address.city': loc.city || '',
+          'address.state': loc.state || '',
+          'address.pincode': loc.pincode || '',
+          'address.country': loc.country || 'India'
+        }
+      });
+    }
+
+    if (sectionId === 'hours' && Array.isArray(content?.businessHours)) {
+      await Restaurant.findByIdAndUpdate(restaurantId, { $set: { businessHours: content.businessHours } });
+    }
 
     // Mark config as having a draft
     await WebsiteConfig.findOneAndUpdate(

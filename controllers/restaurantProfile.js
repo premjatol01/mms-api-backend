@@ -195,10 +195,60 @@ const updateProfile = async (req, res) => {
 
     const body = { ...req.body };
 
-    // Remap `address` → `detailedAddress` (frontend sends `address`)
+    // Remap `address` → `detailedAddress` and keep basic `address` in sync
     if (body.address) {
-      body.detailedAddress = body.address;
-      delete body.address;
+      const addrObj = body.address;
+      body.detailedAddress = addrObj;
+      const fullAddress = [
+        addrObj.line1,
+        addrObj.line2,
+        addrObj.area,
+        addrObj.landmark ? `Near ${addrObj.landmark}` : null,
+        addrObj.city,
+        addrObj.state,
+        addrObj.pincode,
+        addrObj.country || 'India'
+      ].filter(Boolean).join(', ');
+
+      body.address = {
+        fullAddress,
+        city: addrObj.city || '',
+        state: addrObj.state || '',
+        pincode: addrObj.pincode || '',
+        country: addrObj.country || 'India'
+      };
+
+      // Also sync to WebsiteSection ('map')
+      try {
+        const WebsiteSection = require('../models/WebsiteSection');
+        WebsiteSection.findOneAndUpdate(
+          { restaurantId: req.user.restaurantId, sectionId: 'map' },
+          {
+            $set: {
+              'content.location.houseNumber': addrObj.line1 || '',
+              'content.location.street': addrObj.line2 || '',
+              'content.location.area': addrObj.area || '',
+              'content.location.landmark': addrObj.landmark || '',
+              'content.location.city': addrObj.city || '',
+              'content.location.state': addrObj.state || '',
+              'content.location.pincode': addrObj.pincode || '',
+              'content.location.country': addrObj.country || 'India',
+              'content.location.addressLine': fullAddress,
+              'draftContent.location.houseNumber': addrObj.line1 || '',
+              'draftContent.location.street': addrObj.line2 || '',
+              'draftContent.location.area': addrObj.area || '',
+              'draftContent.location.landmark': addrObj.landmark || '',
+              'draftContent.location.city': addrObj.city || '',
+              'draftContent.location.state': addrObj.state || '',
+              'draftContent.location.pincode': addrObj.pincode || '',
+              'draftContent.location.country': addrObj.country || 'India',
+              'draftContent.location.addressLine': fullAddress
+            }
+          }
+        ).catch(() => {});
+      } catch (secErr) {
+        console.error('Error syncing address to map section:', secErr);
+      }
     }
 
     // Fields the restaurant admin is NOT allowed to modify directly
