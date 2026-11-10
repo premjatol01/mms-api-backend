@@ -10,11 +10,18 @@ const websiteConfigSchema = new mongoose.Schema({
   email: { type: String },
   address: { type: String },
   websiteStatus: { type: String, enum: ['published', 'draft'], default: 'draft' },
+  hasDraft: { type: Boolean, default: false },
   websiteColors: {
     primary: { type: String, default: '#f29191' },
     secondary: { type: String, default: '#b1e5e6' },
     background: { type: String, default: '#ffffff' },
     text: { type: String, default: '#1f2937' }
+  },
+  draftWebsiteColors: {
+    primary: { type: String },
+    secondary: { type: String },
+    background: { type: String },
+    text: { type: String }
   },
   publishedAt: { type: Date }
 }, { timestamps: true });

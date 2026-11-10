@@ -8,7 +8,9 @@ const websiteSectionSchema = new mongoose.Schema({
   description: { type: String },
   enabled: { type: Boolean, default: true },
   order: { type: Number },
-  content: { type: mongoose.Schema.Types.Mixed }
+  content: { type: mongoose.Schema.Types.Mixed },
+  draftContent: { type: mongoose.Schema.Types.Mixed, default: null },
+  draftEnabled: { type: Boolean, default: null }
 });
 
 module.exports = mongoose.model('WebsiteSection', websiteSectionSchema);

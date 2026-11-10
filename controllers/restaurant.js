@@ -471,9 +471,18 @@ exports.getRestaurantPortfolio = async (req, res) => {
       });
     }
 
-    // Check if website is published
+    // Check if website is published (or preview mode)
     const WebsiteConfig = require('../models/WebsiteConfig');
     const websiteConfig = await WebsiteConfig.findOne({ restaurantId: restaurant._id });
+
+    const previewToken = req.query.preview;
+    const isPreviewMode = Boolean(
+      previewToken && (
+        previewToken === 'true' ||
+        previewToken === '1' ||
+        previewToken === restaurant._id.toString()
+      )
+    );
 
     const isRestaurantPublished = restaurant.website?.status === 'published';
     const isConfigPublished = websiteConfig?.websiteStatus === 'published';
@@ -487,7 +496,7 @@ exports.getRestaurantPortfolio = async (req, res) => {
       restaurant.website?.status !== 'draft' &&
       websiteConfig?.websiteStatus !== 'draft';
 
-    if (!isPublished) {
+    if (!isPublished && !isPreviewMode) {
       return res.status(404).json({
         success: false,
         isUnpublished: true,
@@ -505,7 +514,10 @@ exports.getRestaurantPortfolio = async (req, res) => {
     }
 
     const restaurantData = restaurant.toObject ? restaurant.toObject() : { ...restaurant };
-    const rawColors = websiteConfig?.websiteColors?.toObject ? websiteConfig.websiteColors.toObject() : websiteConfig?.websiteColors;
+    const chosenColors = isPreviewMode
+      ? (websiteConfig?.draftWebsiteColors || websiteConfig?.websiteColors)
+      : websiteConfig?.websiteColors;
+    const rawColors = chosenColors?.toObject ? chosenColors.toObject() : chosenColors;
     restaurantData.websiteColors = {
       primary: '#f29191',
       secondary: '#b1e5e6',
@@ -522,7 +534,18 @@ exports.getRestaurantPortfolio = async (req, res) => {
     };
 
     const WebsiteSection = require('../models/WebsiteSection');
-    let sections = await WebsiteSection.find({ restaurantId: restaurant._id, enabled: true }).sort({ order: 1 });
+    // In preview mode, fetch ALL sections (including disabled) and use draftContent if available
+    let sections;
+    if (isPreviewMode) {
+      const allSections = await WebsiteSection.find({ restaurantId: restaurant._id }).sort({ order: 1 });
+      sections = allSections.map((s) => ({
+        ...s.toObject(),
+        enabled: s.draftEnabled !== null && s.draftEnabled !== undefined ? s.draftEnabled : s.enabled,
+        content: s.draftContent !== null && s.draftContent !== undefined ? s.draftContent : s.content
+      })).filter((s) => s.enabled);
+    } else {
+      sections = await WebsiteSection.find({ restaurantId: restaurant._id, enabled: true }).sort({ order: 1 });
+    }
 
     // Check if footer is present in enabled sections
     let footerSec = sections.find((s) => s.sectionId === 'footer' || s.type === 'footer');

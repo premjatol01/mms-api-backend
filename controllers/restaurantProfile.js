@@ -436,18 +436,6 @@ const syncMasterMenuSelection = async (req, res) => {
     restaurant.masterMenuSelection = { categoryIds, itemIds };
     await restaurant.save();
 
-    // Reflect cover banner into website Hero Section
-    try {
-      const WebsiteSection = require('../models/WebsiteSection');
-      const fullCoverUrl = buildUrl(req, coverPath);
-      await WebsiteSection.findOneAndUpdate(
-        { restaurantId: restaurant._id, sectionId: 'hero' },
-        { $set: { 'content.imageUrl': fullCoverUrl } }
-      );
-    } catch (heroErr) {
-      console.warn('Failed to sync cover image to website hero section:', heroErr);
-    }
-
     const masterCategories = await MasterCategory.find({ _id: { $in: categoryIds } });
     const masterItems = await MasterItem.find({ _id: { $in: itemIds } });
 

@@ -12,6 +12,7 @@ const {
   updateWebsiteConfig,
   publishWebsite,
   unpublishWebsite,
+  saveDraft,
   getSections,
   updateSection,
   toggleSection,
@@ -56,6 +57,7 @@ router.route('/config')
 
 router.post('/publish', publishWebsite);
 router.post('/unpublish', unpublishWebsite);
+router.post('/draft', saveDraft);
 
 // Website Sections (Reordering removed, fixed natural order)
 router.route('/sections')

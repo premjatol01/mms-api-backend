@@ -395,26 +395,30 @@ exports.getWebsiteConfig = async (req, res) => {
     }
 
     // Normalize sections format so frontend receives `id` matching `sectionId`
+    // Admin always sees draft content if available (so they can preview their edits)
     const formattedSections = sections.map((s) => ({
       id: s.sectionId,
       _id: s._id,
       type: s.type,
       title: s.title,
       description: s.description,
-      enabled: s.enabled,
+      enabled: s.draftEnabled !== null && s.draftEnabled !== undefined ? s.draftEnabled : s.enabled,
       order: s.order,
-      content: s.content
+      content: s.draftContent !== null && s.draftContent !== undefined ? s.draftContent : s.content
     }));
 
     const configData = config.toObject ? config.toObject() : { ...config };
     if (!configData.restaurantSlug && restaurant.website?.subdomain) {
       configData.restaurantSlug = restaurant.website.subdomain;
     }
+    if (configData.draftWebsiteColors && (configData.draftWebsiteColors.primary || configData.draftWebsiteColors.background)) {
+      configData.websiteColors = configData.draftWebsiteColors;
+    }
 
     res.status(200).json({
       success: true,
       data: {
-        config: configData,
+        config: { ...configData, hasDraft: configData.hasDraft || false },
         sections: formattedSections
       }
     });
@@ -439,7 +443,10 @@ exports.updateWebsiteConfig = async (req, res) => {
     if (phone !== undefined) updateFields.phone = phone;
     if (email !== undefined) updateFields.email = email;
     if (address !== undefined) updateFields.address = address;
-    if (websiteColors) updateFields.websiteColors = websiteColors;
+    if (websiteColors) {
+      updateFields.draftWebsiteColors = websiteColors;
+      updateFields.hasDraft = true;
+    }
     if (restaurantSlug !== undefined) {
       const cleanSlug = (restaurantSlug || '').trim().toLowerCase();
       updateFields.restaurantSlug = cleanSlug;
@@ -484,20 +491,106 @@ exports.publishWebsite = async (req, res) => {
   try {
     const restaurantId = req.user.restaurantId;
 
-    const config = await WebsiteConfig.findOneAndUpdate(
+    // Promote all draft content to live content
+    const sections = await WebsiteSection.find({ restaurantId });
+    for (const section of sections) {
+      const updateFields = {};
+      if (section.draftContent !== null && section.draftContent !== undefined) {
+        updateFields.content = section.draftContent;
+        updateFields.draftContent = null;
+      }
+      if (section.draftEnabled !== null && section.draftEnabled !== undefined) {
+        updateFields.enabled = section.draftEnabled;
+        updateFields.draftEnabled = null;
+      }
+      if (Object.keys(updateFields).length > 0) {
+        await WebsiteSection.updateOne({ _id: section._id }, { $set: updateFields });
+
+        // Sync side effects for specific sections
+        const liveContent = updateFields.content || section.content;
+        const sectionId = section.sectionId;
+
+        if (sectionId === 'hero' && liveContent?.imageUrl !== undefined) {
+          let coverImg = liveContent.imageUrl || null;
+          if (coverImg && coverImg.startsWith('http://localhost:5000')) coverImg = coverImg.replace('http://localhost:5000', '');
+          await Restaurant.findByIdAndUpdate(restaurantId, { $set: { coverImage: coverImg } });
+        }
+
+        if (sectionId === 'footer' && liveContent?.socialLinks) {
+          const socialUpdates = {};
+          if (liveContent.subtitle) socialUpdates.tagline = liveContent.subtitle;
+          const sl = liveContent.socialLinks;
+          ['instagram', 'facebook', 'twitter', 'youtube'].forEach((k) => {
+            if (sl[k] !== undefined) socialUpdates[`socialLinks.${k}`] = sl[k];
+          });
+          if (sl.whatsapp !== undefined) {
+            socialUpdates['socialLinks.whatsapp'] = sl.whatsapp;
+            socialUpdates['contact.whatsapp'] = sl.whatsapp;
+          }
+          if (Object.keys(socialUpdates).length > 0) await Restaurant.findByIdAndUpdate(restaurantId, { $set: socialUpdates });
+        }
+
+        if (sectionId === 'googleReview' && liveContent?.googleReviewLink !== undefined) {
+          await Restaurant.findByIdAndUpdate(restaurantId, { $set: { googleReviewLink: liveContent.googleReviewLink } });
+        }
+
+        if (sectionId === 'menu' && Array.isArray(liveContent?.categoryIds) && liveContent.categoryIds.length > 0) {
+          const MenuCategory = require('../models/MenuCategory');
+          const catIds = liveContent.categoryIds.slice(0, 5);
+          await MenuCategory.updateMany({ restaurantId }, { $set: { isTopCategory: false } });
+          for (let i = 0; i < catIds.length; i++) {
+            await MenuCategory.updateOne({ restaurantId, _id: catIds[i] }, { $set: { isTopCategory: true, displayOrder: i + 1 } });
+          }
+        }
+      }
+    }
+
+    // Promote draft colors to live colors if any
+    const existingConfig = await WebsiteConfig.findOne({ restaurantId });
+    const configUpdate = { websiteStatus: 'published', publishedAt: new Date(), hasDraft: false };
+    if (existingConfig?.draftWebsiteColors && (existingConfig.draftWebsiteColors.primary || existingConfig.draftWebsiteColors.background)) {
+      configUpdate.websiteColors = {
+        ...(existingConfig.websiteColors?.toObject ? existingConfig.websiteColors.toObject() : existingConfig.websiteColors),
+        ...(existingConfig.draftWebsiteColors?.toObject ? existingConfig.draftWebsiteColors.toObject() : existingConfig.draftWebsiteColors)
+      };
+      configUpdate.draftWebsiteColors = null;
+    }
+
+    await WebsiteConfig.findOneAndUpdate(
       { restaurantId },
-      { $set: { websiteStatus: 'published', publishedAt: new Date() } },
+      { $set: configUpdate },
       { new: true }
     );
 
-    await Restaurant.findByIdAndUpdate(restaurantId, {
-      $set: { 'website.status': 'published' }
-    });
+    await Restaurant.findByIdAndUpdate(restaurantId, { $set: { 'website.status': 'published' } });
 
     res.status(200).json({
       success: true,
       message: 'Website published successfully',
-      data: { websiteStatus: 'published' }
+      data: { websiteStatus: 'published', hasDraft: false }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Save/mark website as having draft changes
+ * @route   POST /api/restaurant/website/draft
+ * @access  Private (restaurant_admin)
+ */
+exports.saveDraft = async (req, res) => {
+  try {
+    const restaurantId = req.user.restaurantId;
+    const config = await WebsiteConfig.findOneAndUpdate(
+      { restaurantId },
+      { $set: { hasDraft: true } },
+      { new: true, upsert: true }
+    );
+    res.status(200).json({
+      success: true,
+      message: 'Draft saved successfully',
+      data: { hasDraft: true, config }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -607,38 +700,40 @@ exports.getSections = async (req, res) => {
  * @route   PUT /api/restaurant/website/sections/:sectionId
  * @access  Private (restaurant_admin)
  */
+/**
+ * Process content: save base64 images, return cleaned content object
+ */
+const processContent = (content, restaurantId) => {
+  if (!content || typeof content !== 'object') return content;
+  content = { ...content };
+  if (Array.isArray(content.images)) {
+    content.images = content.images.map((img) => {
+      if (img && img.url && typeof img.url === 'string' && img.url.startsWith('data:image/')) {
+        return { ...img, url: saveBase64Image(img.url, restaurantId) };
+      }
+      return img;
+    });
+  }
+  if (content.imageUrl && typeof content.imageUrl === 'string' && content.imageUrl.startsWith('data:image/')) {
+    content.imageUrl = saveBase64Image(content.imageUrl, restaurantId);
+  }
+  return content;
+};
+
 exports.updateSection = async (req, res) => {
   try {
     const restaurantId = req.user.restaurantId;
     const { sectionId } = req.params;
     let { content, title, description, enabled } = req.body;
 
+    if (content !== undefined) content = processContent(content, restaurantId);
+
+    // Save as draft — does NOT touch live `content` field
     const updateFields = {};
-    if (content !== undefined) {
-      if (content && typeof content === 'object') {
-        content = { ...content };
-        // Process gallery images array if present
-        if (Array.isArray(content.images)) {
-          content.images = content.images.map((img) => {
-            if (img && img.url && typeof img.url === 'string' && img.url.startsWith('data:image/')) {
-              return {
-                ...img,
-                url: saveBase64Image(img.url, restaurantId)
-              };
-            }
-            return img;
-          });
-        }
-        // Process hero / about single imageUrl if present
-        if (content.imageUrl && typeof content.imageUrl === 'string' && content.imageUrl.startsWith('data:image/')) {
-          content.imageUrl = saveBase64Image(content.imageUrl, restaurantId);
-        }
-      }
-      updateFields.content = content;
-    }
+    if (content !== undefined) updateFields.draftContent = content;
     if (title !== undefined) updateFields.title = title;
     if (description !== undefined) updateFields.description = description;
-    if (enabled !== undefined) updateFields.enabled = enabled;
+    if (enabled !== undefined) updateFields.draftEnabled = enabled;
 
     const section = await WebsiteSection.findOneAndUpdate(
       { restaurantId, sectionId },
@@ -646,60 +741,12 @@ exports.updateSection = async (req, res) => {
       { new: true, upsert: true }
     );
 
-    if (sectionId === 'hero' && content && typeof content === 'object') {
-      let coverImg = content.imageUrl || null;
-      if (coverImg && coverImg.startsWith('http://localhost:5000')) {
-        coverImg = coverImg.replace('http://localhost:5000', '');
-      }
-      await Restaurant.findByIdAndUpdate(restaurantId, {
-        $set: { coverImage: coverImg }
-      });
-    }
-
-    if (sectionId === 'footer' && content && typeof content === 'object') {
-      const socialUpdates = {};
-      if (content.subtitle) socialUpdates.tagline = content.subtitle;
-      if (content.socialLinks) {
-        if (content.socialLinks.instagram !== undefined) socialUpdates['socialLinks.instagram'] = content.socialLinks.instagram;
-        if (content.socialLinks.facebook !== undefined) socialUpdates['socialLinks.facebook'] = content.socialLinks.facebook;
-        if (content.socialLinks.twitter !== undefined) socialUpdates['socialLinks.twitter'] = content.socialLinks.twitter;
-        if (content.socialLinks.youtube !== undefined) socialUpdates['socialLinks.youtube'] = content.socialLinks.youtube;
-        if (content.socialLinks.whatsapp !== undefined) {
-          socialUpdates['socialLinks.whatsapp'] = content.socialLinks.whatsapp;
-          socialUpdates['contact.whatsapp'] = content.socialLinks.whatsapp;
-        }
-      }
-      if (Object.keys(socialUpdates).length > 0) {
-        await Restaurant.findByIdAndUpdate(restaurantId, { $set: socialUpdates });
-      }
-    }
-
-    if (sectionId === 'googleReview' && content && typeof content === 'object') {
-      if (content.googleReviewLink !== undefined) {
-        await Restaurant.findByIdAndUpdate(restaurantId, {
-          $set: { googleReviewLink: content.googleReviewLink }
-        });
-      }
-    }
-
-    if (sectionId === 'menu' && content && typeof content === 'object') {
-      if (Array.isArray(content.categoryIds) && content.categoryIds.length > 0) {
-        const MenuCategory = require('../models/MenuCategory');
-        const catIds = content.categoryIds.slice(0, 5);
-        // Reset top categories for restaurant
-        await MenuCategory.updateMany(
-          { restaurantId },
-          { $set: { isTopCategory: false } }
-        );
-        // Set isTopCategory for selected categories
-        for (let i = 0; i < catIds.length; i++) {
-          await MenuCategory.updateOne(
-            { restaurantId, _id: catIds[i] },
-            { $set: { isTopCategory: true, displayOrder: i + 1 } }
-          );
-        }
-      }
-    }
+    // Mark config as having a draft
+    await WebsiteConfig.findOneAndUpdate(
+      { restaurantId },
+      { $set: { hasDraft: true } },
+      { upsert: true }
+    );
 
     res.status(200).json({
       success: true,
@@ -709,9 +756,9 @@ exports.updateSection = async (req, res) => {
         type: section.type,
         title: section.title,
         description: section.description,
-        enabled: section.enabled,
+        enabled: section.draftEnabled !== null && section.draftEnabled !== undefined ? section.draftEnabled : section.enabled,
         order: section.order,
-        content: section.content
+        content: section.draftContent !== null && section.draftContent !== undefined ? section.draftContent : section.content
       }
     });
   } catch (error) {
@@ -734,16 +781,17 @@ exports.toggleSection = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Section not found' });
     }
 
-    const newEnabled = req.body.enabled !== undefined ? req.body.enabled : !existing.enabled;
-    existing.enabled = newEnabled;
+    const currentEnabled = existing.draftEnabled !== null && existing.draftEnabled !== undefined ? existing.draftEnabled : existing.enabled;
+    const newEnabled = req.body.enabled !== undefined ? req.body.enabled : !currentEnabled;
+    existing.draftEnabled = newEnabled;
     await existing.save();
+
+    // Mark config as having a draft
+    await WebsiteConfig.findOneAndUpdate({ restaurantId }, { $set: { hasDraft: true } }, { upsert: true });
 
     res.status(200).json({
       success: true,
-      data: {
-        id: existing.sectionId,
-        enabled: existing.enabled
-      }
+      data: { id: existing.sectionId, enabled: newEnabled }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
