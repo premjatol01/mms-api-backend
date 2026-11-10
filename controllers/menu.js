@@ -11,6 +11,24 @@ exports.getCategories = async (req, res) => {
   try {
     const categories = await MenuCategory.find({ restaurantId: req.user.restaurantId })
       .sort({ isTopCategory: -1, displayOrder: 1, createdAt: 1 });
+
+    // Auto-heal empty master category descriptions
+    const emptyMasterCats = categories.filter(c => c.masterCategoryId && (!c.description || c.description.trim() === ''));
+    if (emptyMasterCats.length > 0) {
+      const MasterCategory = require('../models/MasterCategory');
+      const masterCatIds = emptyMasterCats.map(c => c.masterCategoryId);
+      const masterCatDocs = await MasterCategory.find({ _id: { $in: masterCatIds } });
+      const masterCatMap = new Map(masterCatDocs.map(m => [m._id.toString(), m]));
+
+      for (const c of emptyMasterCats) {
+        const m = masterCatMap.get(c.masterCategoryId.toString());
+        if (m && m.description) {
+          c.description = m.description;
+          await MenuCategory.updateOne({ _id: c._id }, { $set: { description: m.description } });
+        }
+      }
+    }
+
     res.json({ success: true, data: categories });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error fetching categories' });
@@ -186,6 +204,24 @@ exports.deleteCategory = async (req, res) => {
 exports.getItems = async (req, res) => {
   try {
     const items = await MenuItem.find({ restaurantId: req.user.restaurantId }).sort({ createdAt: -1 });
+
+    // Auto-heal empty master item descriptions
+    const emptyMasterItems = items.filter(it => it.masterItemId && (!it.description || it.description.trim() === ''));
+    if (emptyMasterItems.length > 0) {
+      const MasterItem = require('../models/MasterItem');
+      const masterIds = emptyMasterItems.map(it => it.masterItemId);
+      const masterDocs = await MasterItem.find({ _id: { $in: masterIds } });
+      const masterMap = new Map(masterDocs.map(m => [m._id.toString(), m]));
+
+      for (const it of emptyMasterItems) {
+        const m = masterMap.get(it.masterItemId.toString());
+        if (m && m.description) {
+          it.description = m.description;
+          await MenuItem.updateOne({ _id: it._id }, { $set: { description: m.description } });
+        }
+      }
+    }
+
     res.json({ success: true, data: items });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error fetching menu items' });
