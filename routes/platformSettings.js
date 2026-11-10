@@ -30,4 +30,6 @@ router.route('/')
   .get(getPlatformSettings)
   .put(upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }]), updatePlatformSettings);
 
+router.get('/public', getPlatformSettings);
+
 module.exports = router;

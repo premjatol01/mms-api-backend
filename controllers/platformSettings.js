@@ -9,9 +9,10 @@ exports.getPlatformSettings = async (req, res) => {
     // If settings don't exist yet, return a default object or create one
     if (!settings) {
       settings = await PlatformSettings.create({
-        platformName: 'Menu Management System',
+        platformName: 'Tablly',
         platformStatus: 'Active',
-        maintenanceEnabled: false
+        maintenanceEnabled: false,
+        maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
       });
     }
 
@@ -25,7 +26,24 @@ exports.getPlatformSettings = async (req, res) => {
 // @route   PUT /api/platform-settings
 exports.updatePlatformSettings = async (req, res) => {
   try {
-    const { platformName, platformStatus, maintenanceEnabled, maintenanceMessage } = req.body;
+    const {
+      platformName,
+      platformStatus,
+      maintenanceEnabled,
+      maintenanceMessage,
+      companyName,
+      supportEmail,
+      supportPhone,
+      address,
+      websiteUrl,
+      copyrightText,
+      currency,
+      timezone,
+      dateFormat,
+      timeFormat,
+      platformWebsiteEnabled,
+      restaurantWebsiteAvailability
+    } = req.body;
     
     let logoUrl = req.body.logoUrl;
     let faviconUrl = req.body.faviconUrl;
@@ -39,15 +57,71 @@ exports.updatePlatformSettings = async (req, res) => {
       }
     }
 
-    const updateData = {
-      platformName,
-      platformStatus,
-      maintenanceEnabled: maintenanceEnabled === 'true', // formData casts boolean to string
-      maintenanceMessage
+    // Determine maintenance state safely across boolean, string, or number values
+    const isMaintenance =
+      maintenanceEnabled === true ||
+      maintenanceEnabled === 'true' ||
+      maintenanceEnabled === 1 ||
+      maintenanceEnabled === '1' ||
+      platformStatus === 'Maintenance';
+
+    const updateData = {};
+
+    if (platformName !== undefined && platformName.trim()) {
+      updateData.platformName = platformName.trim();
+    }
+
+    updateData.maintenanceEnabled = isMaintenance;
+    if (isMaintenance) {
+      updateData.platformStatus = 'Maintenance';
+      updateData.maintenanceMessage = (maintenanceMessage && maintenanceMessage.trim())
+        ? maintenanceMessage.trim()
+        : 'We are currently performing scheduled maintenance. Please check back soon.';
+    } else {
+      if (platformStatus === 'Maintenance') {
+        updateData.platformStatus = 'Active';
+      } else if (platformStatus) {
+        updateData.platformStatus = platformStatus;
+      }
+      if (maintenanceMessage !== undefined) {
+        updateData.maintenanceMessage = maintenanceMessage.trim();
+      }
+    }
+
+    // Relative path cleanup for logo and favicon
+    const sanitizeUrl = (url) => {
+      if (!url) return '';
+      // Strip any accidental localhost / domain prefix so clean relative path is stored
+      return url.replace(/^https?:\/\/[^/]+/i, '');
     };
 
-    if (logoUrl !== undefined) updateData.logoUrl = logoUrl;
-    if (faviconUrl !== undefined) updateData.faviconUrl = faviconUrl;
+    if (logoUrl !== undefined) updateData.logoUrl = sanitizeUrl(logoUrl);
+    if (faviconUrl !== undefined) updateData.faviconUrl = sanitizeUrl(faviconUrl);
+
+    // General & platform optional fields
+    const optionalText = {
+      companyName,
+      supportEmail,
+      supportPhone,
+      address,
+      websiteUrl,
+      copyrightText,
+      currency,
+      timezone,
+      dateFormat,
+      timeFormat
+    };
+
+    for (const [key, val] of Object.entries(optionalText)) {
+      if (val !== undefined) updateData[key] = val;
+    }
+
+    if (platformWebsiteEnabled !== undefined) {
+      updateData.platformWebsiteEnabled = platformWebsiteEnabled === true || platformWebsiteEnabled === 'true';
+    }
+    if (restaurantWebsiteAvailability !== undefined) {
+      updateData.restaurantWebsiteAvailability = restaurantWebsiteAvailability === true || restaurantWebsiteAvailability === 'true';
+    }
 
     let settings = await PlatformSettings.findOne();
     
@@ -61,7 +135,7 @@ exports.updatePlatformSettings = async (req, res) => {
       );
     }
 
-    res.status(200).json({ success: true, data: settings, message: 'Settings updated successfully' });
+    res.status(200).json({ success: true, data: settings, message: 'Platform settings updated successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

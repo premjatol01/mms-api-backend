@@ -247,6 +247,18 @@ async function resolveRestaurantAndTable(subdomain, tableId) {
 // @access  Public
 exports.getPublicTableSession = async (req, res) => {
   try {
+    const PlatformSettings = require('../models/PlatformSettings');
+    const platformSettings = await PlatformSettings.findOne();
+    if (platformSettings && (platformSettings.maintenanceEnabled || platformSettings.platformStatus === 'Maintenance')) {
+      return res.status(503).json({
+        success: false,
+        isMaintenance: true,
+        message: platformSettings.maintenanceMessage || 'Platform is currently undergoing scheduled maintenance.',
+        platformName: platformSettings.platformName || 'Tablly',
+        logoUrl: platformSettings.logoUrl || null
+      });
+    }
+
     const { subdomain, tableId } = req.params;
     const resolved = await resolveRestaurantAndTable(subdomain, tableId);
     if (resolved.error) {
@@ -329,6 +341,16 @@ exports.getPublicTableSession = async (req, res) => {
 // @access  Public
 exports.placePublicOrder = async (req, res) => {
   try {
+    const PlatformSettings = require('../models/PlatformSettings');
+    const platformSettings = await PlatformSettings.findOne();
+    if (platformSettings && (platformSettings.maintenanceEnabled || platformSettings.platformStatus === 'Maintenance')) {
+      return res.status(503).json({
+        success: false,
+        isMaintenance: true,
+        message: platformSettings.maintenanceMessage || 'Platform is currently undergoing scheduled maintenance. Orders cannot be placed at this time.'
+      });
+    }
+
     const { subdomain, tableId, items, mobile, appliedOffer, discount = 0 } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {

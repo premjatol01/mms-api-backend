@@ -433,6 +433,19 @@ exports.sendInvite = async (req, res) => {
 // @access  Public
 exports.getRestaurantPortfolio = async (req, res) => {
   try {
+    // Check if platform is under maintenance
+    const PlatformSettings = require('../models/PlatformSettings');
+    const platformSettings = await PlatformSettings.findOne();
+    if (platformSettings && (platformSettings.maintenanceEnabled || platformSettings.platformStatus === 'Maintenance')) {
+      return res.status(503).json({
+        success: false,
+        isMaintenance: true,
+        message: platformSettings.maintenanceMessage || 'Platform is currently undergoing scheduled maintenance.',
+        platformName: platformSettings.platformName || 'Tablly',
+        logoUrl: platformSettings.logoUrl || null
+      });
+    }
+
     const { subdomain } = req.params;
     if (!subdomain) {
       return res.status(400).json({ success: false, message: 'Subdomain is required' });
@@ -789,6 +802,20 @@ exports.getRestaurantPortfolio = async (req, res) => {
 // @access  Public
 exports.verifyTableSession = async (req, res) => {
   try {
+    // Check if platform is under maintenance
+    const PlatformSettings = require('../models/PlatformSettings');
+    const platformSettings = await PlatformSettings.findOne();
+    if (platformSettings && (platformSettings.maintenanceEnabled || platformSettings.platformStatus === 'Maintenance')) {
+      return res.status(503).json({
+        success: false,
+        errorType: 'MAINTENANCE_MODE',
+        isMaintenance: true,
+        message: platformSettings.maintenanceMessage || 'Platform is currently undergoing scheduled maintenance.',
+        platformName: platformSettings.platformName || 'Tablly',
+        logoUrl: platformSettings.logoUrl || null
+      });
+    }
+
     const { subdomain, tableId } = req.params;
 
     if (!subdomain || !subdomain.trim()) {
