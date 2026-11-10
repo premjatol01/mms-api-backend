@@ -40,8 +40,17 @@ const buildUrl = (req, filePath) => {
  * The basic `address` field (set by super-admin during creation) is merged
  * as fallback so the restaurant always has something to show.
  */
-const formatProfile = (restaurant, req) => {
+const formatProfile = (restaurant, req, tableCount = 0) => {
   const r = restaurant.toObject();
+
+  const pkg = r.subscription?.packageId;
+  const planName = pkg?.name || r.subscription?.packageName || 'Standard';
+  let maxTables = pkg?.maxTables;
+  if (!maxTables) {
+    if (planName.toLowerCase() === 'standard') maxTables = 50;
+    else if (planName.toLowerCase() === 'premium') maxTables = 150;
+    else maxTables = 15;
+  }
 
   // Merge basic address as fallback into detailedAddress fields
   const address = {
@@ -105,8 +114,30 @@ const formatProfile = (restaurant, req) => {
       chargeType: r.gstSettings?.chargeType || 'exclusive',
     },
 
-    // Read-only subscription info (for the Subscription tab)
-    subscription: r.subscription || {},
+    // Read-only subscription info (for the Subscription tab & profile module)
+    subscription: {
+      ...(r.subscription || {}),
+      packageName: planName,
+      maxTables,
+      features: pkg?.features || [],
+      package: pkg ? {
+        _id: pkg._id,
+        id: pkg._id,
+        name: pkg.name,
+        maxTables: pkg.maxTables,
+        features: pkg.features || [],
+        description: pkg.description || ''
+      } : {
+        name: planName,
+        maxTables,
+        features: []
+      },
+      tableUsage: {
+        used: tableCount !== undefined ? tableCount : 0,
+        limit: maxTables,
+        remaining: Math.max(0, maxTables - (tableCount || 0))
+      }
+    },
 
     // Master Menu Selection
     masterMenuSelection: {
@@ -133,11 +164,14 @@ const formatProfile = (restaurant, req) => {
  */
 const getProfile = async (req, res) => {
   try {
-    const restaurant = await Restaurant.findById(req.user.restaurantId);
+    const restaurant = await Restaurant.findById(req.user.restaurantId).populate('subscription.packageId');
     if (!restaurant) {
       return res.status(404).json({ success: false, message: 'Restaurant not found' });
     }
-    res.status(200).json({ success: true, data: formatProfile(restaurant, req) });
+    const Table = require('../models/Table');
+    const tableCount = await Table.countDocuments({ restaurantId: req.user.restaurantId });
+
+    res.status(200).json({ success: true, data: formatProfile(restaurant, req, tableCount) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

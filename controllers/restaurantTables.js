@@ -122,6 +122,10 @@ exports.getTables = async (req, res) => {
       const pkg = await Package.findOne({ name: new RegExp(`^${restaurant.subscription.packageName}$`, 'i') });
       if (pkg?.maxTables) maxTables = pkg.maxTables;
     }
+    if (maxTables === 15) {
+      if (planName.toLowerCase() === 'standard') maxTables = 50;
+      else if (planName.toLowerCase() === 'premium') maxTables = 150;
+    }
 
     res.status(200).json({
       success: true,
@@ -148,6 +152,10 @@ exports.createTable = async (req, res) => {
       const Package = require('../models/Package');
       const pkg = await Package.findOne({ name: new RegExp(`^${restaurant.subscription.packageName}$`, 'i') });
       if (pkg?.maxTables) maxTables = pkg.maxTables;
+    }
+    if (maxTables === 15) {
+      if (planName.toLowerCase() === 'standard') maxTables = 50;
+      else if (planName.toLowerCase() === 'premium') maxTables = 150;
     }
 
     const currentTableCount = await Table.countDocuments({ restaurantId });
