@@ -183,12 +183,13 @@ exports.createTable = async (req, res) => {
       const createdTables = [];
       for (let i = 1; i <= count; i++) {
         const tableNum = maxNum + i;
-        const tableLabel = `Table ${tableNum}`;
+        const tableLabel = `${tableNum}`;
 
         const table = await Table.create({
           restaurantId,
           tableId: tableLabel,
           tableNo: tableLabel,
+          number: tableNum,
           status: 'active'
         });
 
@@ -197,7 +198,7 @@ exports.createTable = async (req, res) => {
         const qrDoc = new QrCode({
           restaurantId,
           tableId: table._id,
-          name: `${tableLabel} QR`,
+          name: `Table ${tableNum} QR`,
           status: 'assigned',
           templateId: qrTemplate ? qrTemplate._id : null,
           scanUrl
@@ -227,10 +228,12 @@ exports.createTable = async (req, res) => {
 
     // Single table creation (from Tables & QR module)
     const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId } = req.body;
-    const userLabel = (inputTableNo || inputTableId || '').trim();
+    const rawLabel = (inputTableNo || inputTableId || '').trim();
+    const cleanNum = rawLabel.replace(/^table\s*/i, '').trim();
+    const userLabel = cleanNum || rawLabel;
 
     if (!userLabel) {
-      return res.status(400).json({ success: false, message: 'Table No. is required' });
+      return res.status(400).json({ success: false, message: 'Table number is required' });
     }
 
     if (currentTableCount >= maxTables) {
@@ -244,17 +247,21 @@ exports.createTable = async (req, res) => {
       restaurantId,
       $or: [
         { tableNo: new RegExp(`^${userLabel}$`, 'i') },
-        { tableId: new RegExp(`^${userLabel}$`, 'i') }
+        { tableId: new RegExp(`^${userLabel}$`, 'i') },
+        { tableNo: new RegExp(`^Table\\s*${userLabel}$`, 'i') },
+        { tableId: new RegExp(`^Table\\s*${userLabel}$`, 'i') }
       ]
     });
     if (exists) {
-      return res.status(400).json({ success: false, message: 'Table No. already exists' });
+      return res.status(400).json({ success: false, message: 'Table number already exists' });
     }
 
+    const tableNum = parseInt(userLabel.replace(/\D/g, ''), 10) || undefined;
     const table = await Table.create({
       restaurantId,
       tableId: userLabel,
       tableNo: userLabel,
+      number: tableNum,
       status: status || 'active',
       qrCodeId: qrCodeId || undefined
     });
@@ -280,18 +287,23 @@ exports.updateTable = async (req, res) => {
     const table = await Table.findById(req.params.id);
     if (!table) return res.status(404).json({ success: false, message: 'Table not found' });
 
-    const userLabel = (inputTableNo || inputTableId || '').trim();
+    const rawLabel = (inputTableNo || inputTableId || '').trim();
+    const cleanNum = rawLabel.replace(/^table\s*/i, '').trim();
+    const userLabel = cleanNum || rawLabel;
+
     if (userLabel) {
       const exists = await Table.findOne({
         restaurantId: req.user.restaurantId,
         _id: { $ne: req.params.id },
         $or: [
           { tableNo: new RegExp(`^${userLabel}$`, 'i') },
-          { tableId: new RegExp(`^${userLabel}$`, 'i') }
+          { tableId: new RegExp(`^${userLabel}$`, 'i') },
+          { tableNo: new RegExp(`^Table\\s*${userLabel}$`, 'i') },
+          { tableId: new RegExp(`^Table\\s*${userLabel}$`, 'i') }
         ]
       });
       if (exists) {
-        return res.status(400).json({ success: false, message: 'Table No. already exists' });
+        return res.status(400).json({ success: false, message: 'Table number already exists' });
       }
     }
 

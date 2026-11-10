@@ -171,6 +171,16 @@ const updateProfile = async (req, res) => {
     const PROTECTED = ['_id', 'admin', 'subscription', 'createdAt', 'updatedAt'];
     PROTECTED.forEach((f) => delete body[f]);
 
+    // Ensure establishmentYear is safely cast to Number or null
+    if (body.establishmentYear !== undefined) {
+      if (body.establishmentYear === '' || body.establishmentYear === null) {
+        body.establishmentYear = null;
+      } else {
+        const parsedYear = Number(body.establishmentYear);
+        body.establishmentYear = isNaN(parsedYear) ? null : parsedYear;
+      }
+    }
+
     // Build a flat $set object so nested objects are merged, not replaced.
     // E.g. { contact: { primaryPhone: '...' } } becomes { 'contact.primaryPhone': '...' }
     const $set = {};
