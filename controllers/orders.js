@@ -433,7 +433,16 @@ exports.placePublicOrder = async (req, res) => {
     }));
 
     const rawSubtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-    const numDiscount = Math.min(Number(discount) || 0, rawSubtotal);
+    const effectiveMobile = cleanMobile || session.customerMobile || null;
+    let effectiveAppliedOffer = appliedOffer || null;
+    let numDiscount = Math.min(Number(discount) || 0, rawSubtotal);
+
+    // Requirement: Make sure without phone number offer cannot be applied
+    if ((effectiveAppliedOffer || numDiscount > 0) && (!effectiveMobile || effectiveMobile.length < 10)) {
+      effectiveAppliedOffer = null;
+      numDiscount = 0;
+    }
+
     const orderTotal = Math.max(0, rawSubtotal - numDiscount);
     const orderNumber = await getNextOrderNumber(restaurant._id);
 
@@ -445,14 +454,14 @@ exports.placePublicOrder = async (req, res) => {
       orderNumber,
       source: 'qr',
       customer: {
-        mobile: cleanMobile || session.customerMobile || null,
+        mobile: effectiveMobile,
         customerId: customer?._id || session.customerId || null
       },
       items: orderItems,
       subtotal: rawSubtotal,
       discount: numDiscount,
       total: orderTotal,
-      appliedOffer: appliedOffer || null,
+      appliedOffer: effectiveAppliedOffer,
       status: 'pending',
       cancellations: []
     });
@@ -1458,5 +1467,43 @@ exports.endSessionDirectly = async (req, res) => {
   } catch (error) {
     console.error('Error ending session directly:', error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @route   POST /api/orders/public/request-waiter
+// @desc    Customer calls/requests waiter assistance for a specific table
+// @access  Public
+exports.requestWaiter = async (req, res) => {
+  try {
+    const { subdomain, tableId, serviceType = 'General Help', note = '' } = req.body;
+    if (!subdomain || !tableId) {
+      return res.status(400).json({ success: false, message: 'Subdomain and Table ID are required.' });
+    }
+
+    const resolved = await resolveRestaurantAndTable(subdomain, tableId);
+    if (resolved.error) {
+      return res.status(404).json({ success: false, message: resolved.error });
+    }
+
+    const { restaurant, table } = resolved;
+    const tableName = table.tableNo || table.tableId || (table.number ? `Table ${table.number}` : 'Table');
+
+    // Emit live notification to restaurant staff/dashboard
+    emitToRestaurant(restaurant._id, 'waiter:requested', {
+      tableId: table._id,
+      tableNo: tableName,
+      tableName,
+      serviceType,
+      note,
+      requestedAt: new Date(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Staff has been notified for ${tableName}. A waiter will assist you shortly!`,
+    });
+  } catch (error) {
+    console.error('Error requesting waiter assistance:', error);
+    return res.status(500).json({ success: false, message: 'Failed to notify waiter. Please try again.' });
   }
 };

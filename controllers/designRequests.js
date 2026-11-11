@@ -50,7 +50,8 @@ exports.createDesignRequest = async (req, res) => {
     let normalizedType = 'Menu Design';
     if (requestType) {
       const lower = String(requestType).toLowerCase().replace(/[^a-z]/g, '');
-      if (lower.includes('qr')) normalizedType = 'QR Template Design';
+      if (lower.includes('banner') || lower.includes('offer')) normalizedType = 'Offer Banner Design';
+      else if (lower.includes('qr')) normalizedType = 'QR Template Design';
       else if (lower.includes('menu')) normalizedType = 'Menu Design';
       else normalizedType = requestType;
     }

@@ -1095,6 +1095,8 @@ exports.verifyTableSession = async (req, res) => {
           subdomain: restaurant.website?.subdomain,
           status: restaurant.status,
           currency: '₹',
+          socialLinks: restaurant.socialLinks || {},
+          gstSettings: restaurant.gstSettings || null,
           settings: {
             isActive: restaurant.settings?.isActive !== false,
             acceptOrders: restaurant.settings?.acceptOrders !== false

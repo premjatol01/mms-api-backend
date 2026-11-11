@@ -530,14 +530,18 @@ exports.checkOfferEligibility = async (req, res) => {
         }
       }
 
-      // Calculate potential discount
-      if (isEligible) {
-        if (offer.benefit?.type === 'percentage') {
-          potentialDiscount = Math.round(((cartTotal * (offer.benefit.value || 0)) / 100) * 100) / 100;
-        } else {
-          // Flat discount
-          potentialDiscount = Math.min(offer.benefit?.value || 0, cartTotal);
-        }
+      // Calculate potential discount based on cart spend
+      if (offer.benefit?.type === 'percentage') {
+        potentialDiscount = Math.round(((cartTotal * (offer.benefit.value || 0)) / 100) * 100) / 100;
+      } else {
+        // Flat discount
+        potentialDiscount = Math.min(offer.benefit?.value || 0, cartTotal);
+      }
+
+      // Requirement: Without phone number, offer cannot be eligible or applied!
+      if (!cleanMobile) {
+        isEligible = false;
+        eligibilityText = 'Please enter your mobile number to unlock and apply this offer.';
       }
 
       return {
@@ -548,10 +552,21 @@ exports.checkOfferEligibility = async (req, res) => {
       };
     });
 
+    // Identify best offer (highest potentialDiscount among valid offers)
+    let maxDiscount = 0;
+    evaluatedOffers.forEach((o) => {
+      if (o.potentialDiscount > maxDiscount) maxDiscount = o.potentialDiscount;
+    });
+
+    const finalOffers = evaluatedOffers.map((o) => ({
+      ...o,
+      isBestOffer: maxDiscount > 0 && o.potentialDiscount === maxDiscount,
+    }));
+
     res.status(200).json({
       success: true,
-      count: evaluatedOffers.length,
-      data: evaluatedOffers
+      count: finalOffers.length,
+      data: finalOffers
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message || 'Server error checking eligibility' });

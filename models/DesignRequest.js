@@ -4,7 +4,7 @@ const designRequestSchema = new mongoose.Schema({
   restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true },
   requestType: { 
     type: String, 
-    enum: ['Menu Design', 'QR Template Design', 'Other'], 
+    enum: ['Menu Design', 'QR Template Design', 'Offer Banner Design', 'Offer Banner', 'Other'], 
     default: 'Menu Design' 
   },
   title: { type: String, default: '' },
