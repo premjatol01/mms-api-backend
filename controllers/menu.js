@@ -323,6 +323,38 @@ exports.deleteItem = async (req, res) => {
   }
 };
 
+exports.setBestsellerItems = async (req, res) => {
+  try {
+    const { itemIds } = req.body;
+    if (!Array.isArray(itemIds)) {
+      return res.status(400).json({ success: false, message: 'itemIds array is required' });
+    }
+
+    // Reset isBestseller on all items for this restaurant
+    await MenuItem.updateMany(
+      { restaurantId: req.user.restaurantId },
+      { $set: { isBestseller: false, isPopular: false } }
+    );
+
+    // Set isBestseller and isPopular to true for chosen items
+    if (itemIds.length > 0) {
+      await MenuItem.updateMany(
+        { restaurantId: req.user.restaurantId, _id: { $in: itemIds } },
+        { $set: { isBestseller: true, isPopular: true } }
+      );
+    }
+
+    const updatedItems = await MenuItem.find({
+      restaurantId: req.user.restaurantId
+    }).sort({ isBestseller: -1, createdAt: -1 });
+
+    res.json({ success: true, data: updatedItems });
+  } catch (error) {
+    console.error('Error setting bestseller items:', error);
+    res.status(500).json({ success: false, message: 'Server error setting bestseller items' });
+  }
+};
+
 // =======================
 // Combos
 // =======================
@@ -403,10 +435,10 @@ exports.getPublicMenu = async (req, res) => {
 
     let restaurant = await Restaurant.findOne({
       'website.subdomain': { $regex: new RegExp(`^${cleanSubdomain}$`, 'i') }
-    }).select('_id name status');
+    }).select('_id name status logo website socialLinks googleReviewLink portalSettings settings');
 
     if (!restaurant && mongoose.isValidObjectId(cleanSubdomain)) {
-      restaurant = await Restaurant.findById(cleanSubdomain).select('_id name status');
+      restaurant = await Restaurant.findById(cleanSubdomain).select('_id name status logo website socialLinks googleReviewLink portalSettings settings');
     }
 
     if (!restaurant) {
@@ -466,6 +498,16 @@ exports.getPublicMenu = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
+        restaurant: {
+          id: restaurant._id,
+          name: restaurant.name,
+          logo: restaurant.logo,
+          subdomain: restaurant.website?.subdomain,
+          portalSettings: restaurant.portalSettings || {},
+          socialLinks: restaurant.socialLinks || {},
+          googleReviewLink: restaurant.googleReviewLink || '',
+          settings: restaurant.settings || {}
+        },
         categories,
         items,
         combos,

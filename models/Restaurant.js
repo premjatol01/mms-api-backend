@@ -117,6 +117,42 @@ const restaurantSchema = new mongoose.Schema({
   masterMenuSelection: {
     categoryIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MasterCategory' }],
     itemIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MasterItem' }]
+  },
+
+  portalSettings: {
+    waiterRequest: {
+      enabled: { type: Boolean, default: true },
+      cooldownMinutes: { type: Number, default: 2 },
+      instructionsText: { type: String, default: 'A service captain has been notified and is heading to your table.' },
+      options: [{
+        id: { type: String },
+        label: { type: String }
+      }]
+    },
+    offers: {
+      enabled: { type: Boolean, default: true },
+      title: { type: String, default: 'Special Table Offers & Promos' },
+      subtitle: { type: String, default: 'Applicable directly to your dine-in table order at checkout' },
+      bannerAnnouncement: { type: String, default: 'Show active coupon code to your server or apply directly in table session' }
+    },
+    wifiSharing: {
+      enabled: { type: Boolean, default: false },
+      ssid: { type: String, default: '' },
+      password: { type: String, default: '' },
+      security: { type: String, default: 'WPA2' }
+    },
+    followCampaign: {
+      enabled: { type: Boolean, default: false },
+      title: { type: String, default: 'Follow Us & Win' },
+      description: { type: String, default: 'Follow our official Instagram page and show your server for a sweet treat!' }
+    },
+    operations: {
+      acceptOrders: { type: Boolean, default: true },
+      isActive: { type: Boolean, default: true },
+      enableCart: { type: Boolean, default: true },
+      enableFloatingCart: { type: Boolean, default: true },
+      enableGames: { type: Boolean, default: true }
+    }
   }
 }, { timestamps: true });
 

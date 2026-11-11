@@ -101,6 +101,7 @@ const formatProfile = (restaurant, req, tableCount = 0) => {
     // Other sections
     googleReviewLink: r.googleReviewLink || '',
     website: r.website || {},
+    portalSettings: r.portalSettings || {},
     settings: {
       isActive: r.settings?.isActive !== undefined ? Boolean(r.settings.isActive) : (r.status ? r.status === 'active' : true),
       acceptOrders: r.settings?.acceptOrders !== undefined ? Boolean(r.settings.acceptOrders) : true,

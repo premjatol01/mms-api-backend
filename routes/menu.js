@@ -12,6 +12,7 @@ const {
   getItems,
   createItem,
   updateItem,
+  setBestsellerItems,
   deleteItem,
   getCombos,
   createCombo,
@@ -52,6 +53,8 @@ router.route('/categories/:id')
 router.route('/items')
   .get(getItems)
   .post(createItem);
+
+router.put('/items/bestsellers', setBestsellerItems);
 
 router.route('/items/:id')
   .put(updateItem)

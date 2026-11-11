@@ -220,18 +220,39 @@ async function resolveRestaurantAndTable(subdomain, tableId) {
     return { error: `Restaurant '${restaurant.name}' is currently inactive.` };
   }
 
-  let table = await Table.findOne({
-    restaurantId: restaurant._id,
-    $or: [
-      ...(mongoose.isValidObjectId(cleanTableId) ? [{ _id: cleanTableId }] : []),
-      { tableNo: cleanTableId },
-      { tableNo: { $regex: new RegExp(`^${cleanTableId}$`, 'i') } },
-      { tableId: cleanTableId }
-    ]
-  });
+  let table = null;
+  const isPreview = ['preview', 'dummy', 'test', 'table-preview'].includes(cleanTableId.toLowerCase());
+  if (isPreview) {
+    const existingTable = await Table.findOne({ restaurantId: restaurant._id });
+    if (existingTable) {
+      table = {
+        ...existingTable.toObject(),
+        tableNo: 'Preview Table',
+        tableName: 'Preview Table'
+      };
+    } else {
+      table = {
+        _id: new mongoose.Types.ObjectId(),
+        tableNo: 'Preview Table',
+        tableName: 'Preview Table',
+        status: 'active',
+        restaurantId: restaurant._id
+      };
+    }
+  } else {
+    table = await Table.findOne({
+      restaurantId: restaurant._id,
+      $or: [
+        ...(mongoose.isValidObjectId(cleanTableId) ? [{ _id: cleanTableId }] : []),
+        { tableNo: cleanTableId },
+        { tableNo: { $regex: new RegExp(`^${cleanTableId}$`, 'i') } },
+        { tableId: cleanTableId }
+      ]
+    });
+  }
 
   if (!table) return { error: `Table '${cleanTableId}' not found.` };
-  if (table.status && table.status !== 'active') {
+  if (!isPreview && table.status && table.status !== 'active') {
     return { error: `Table is currently inactive.` };
   }
 
@@ -293,13 +314,17 @@ exports.getPublicTableSession = async (req, res) => {
         restaurant: {
           id: restaurant._id,
           name: restaurant.name,
+          logo: restaurant.logo,
           subdomain: restaurant.website?.subdomain,
           currency: '₹',
           gstSettings: restaurant.gstSettings || { enabled: false, percentage: 5, chargeType: 'exclusive' },
           settings: {
             isActive: restaurant.settings?.isActive !== false,
             acceptOrders: restaurant.settings?.acceptOrders !== false
-          }
+          },
+          socialLinks: restaurant.socialLinks || {},
+          googleReviewLink: restaurant.googleReviewLink || '',
+          portalSettings: restaurant.portalSettings || {}
         },
         table: {
           id: table._id,
