@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { roleGuard } = require('../middleware/roleGuard');
+const { requireFeature } = require('../middleware/featureGuard');
 const { createUploader } = require('../middleware/upload');
 
 const {
@@ -30,8 +31,8 @@ router.route('/:id/status')
 // Restaurant Admin Routes
 // --------------------------------------------------------------------------
 router.route('/')
-  .get(roleGuard('restaurant_admin'), getDesignRequests)
-  .post(roleGuard('restaurant_admin'), drUploader.single('attachment'), createDesignRequest);
+  .get(roleGuard('restaurant_admin'), requireFeature('design_requests'), getDesignRequests)
+  .post(roleGuard('restaurant_admin'), requireFeature('design_requests'), drUploader.single('attachment'), createDesignRequest);
 
 router.route('/:id')
   .get(getDesignRequestById);

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { roleGuard } = require('../middleware/roleGuard');
+const { requireFeature } = require('../middleware/featureGuard');
 const { createUploader } = require('../middleware/upload');
 
 const {
@@ -36,9 +37,9 @@ router.route('/admin/:id/status')
 // Restaurant Admin (and Super Admin) Routes
 // -----------------------------------------------------------------------------
 router.route('/')
-  .get(getRestaurantBizGrowth);
+  .get(requireFeature('biz_growth'), getRestaurantBizGrowth);
 
 router.route('/:id')
-  .get(getBizGrowthById);
+  .get(requireFeature('biz_growth'), getBizGrowthById);
 
 module.exports = router;

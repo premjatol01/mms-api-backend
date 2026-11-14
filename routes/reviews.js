@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const { requireFeature } = require('../middleware/featureGuard');
 const {
   createPublicReview,
   getPublicReviews,
@@ -14,7 +15,7 @@ router.post('/public', createPublicReview);
 router.get('/public/:subdomain', getPublicReviews);
 
 // ─── Protected routes (Restaurant Admin) ────────────────────────────────────
-router.use(protect);
+router.use(protect, requireFeature('google_review'));
 
 router.get('/', getAdminReviews);
 router.patch('/:id/status', moderateAdminReview);

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { roleGuard } = require('../middleware/roleGuard');
+const { requireFeature } = require('../middleware/featureGuard');
 
 const {
   getOffers,
@@ -24,7 +25,7 @@ router.post('/public/check-eligibility', checkOfferEligibility);
 // ==========================================
 // RESTAURANT ADMIN ROUTES (Protected)
 // ==========================================
-router.use(protect, roleGuard('restaurant_admin'));
+router.use(protect, roleGuard('restaurant_admin'), requireFeature('offers_promos'));
 
 router.route('/')
   .get(getOffers)

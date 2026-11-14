@@ -114,6 +114,21 @@ async function regenerateQRImage(qrDoc, restaurant, tableLabel) {
 
 // ─── TABLES ────────────────────────────────────────────────────────────────
 
+function resolveTableLimit(restaurant) {
+  let maxTables = 15;
+  let planName = restaurant?.subscription?.packageName || '1 Month Free Trial';
+  const pkg = restaurant?.subscription?.packageId;
+  if (pkg && pkg.maxTables) {
+    return { maxTables: pkg.maxTables, planName: pkg.name || planName };
+  }
+  const lower = planName.toLowerCase();
+  if (lower.includes('starter')) maxTables = 10;
+  else if (lower.includes('pro')) maxTables = 35;
+  else if (lower.includes('enterprise')) maxTables = 100;
+  else if (lower.includes('trial')) maxTables = 15;
+  return { maxTables, planName };
+}
+
 exports.getTables = async (req, res) => {
   try {
     const restaurantId = req.user.restaurantId;
@@ -122,21 +137,7 @@ exports.getTables = async (req, res) => {
       .sort({ createdAt: -1 });
 
     const restaurant = await Restaurant.findById(restaurantId).populate('subscription.packageId');
-    let maxTables = 15;
-    let planName = 'Basic';
-    if (restaurant?.subscription?.packageId?.maxTables) {
-      maxTables = restaurant.subscription.packageId.maxTables;
-      planName = restaurant.subscription.packageId.name || restaurant.subscription.packageName || 'Basic';
-    } else if (restaurant?.subscription?.packageName) {
-      planName = restaurant.subscription.packageName;
-      const Package = require('../models/Package');
-      const pkg = await Package.findOne({ name: new RegExp(`^${restaurant.subscription.packageName}$`, 'i') });
-      if (pkg?.maxTables) maxTables = pkg.maxTables;
-    }
-    if (maxTables === 15) {
-      if (planName.toLowerCase() === 'standard') maxTables = 50;
-      else if (planName.toLowerCase() === 'premium') maxTables = 150;
-    }
+    const { maxTables, planName } = resolveTableLimit(restaurant);
 
     res.status(200).json({
       success: true,
@@ -153,21 +154,7 @@ exports.createTable = async (req, res) => {
   try {
     const restaurantId = req.user.restaurantId;
     const restaurant = await Restaurant.findById(restaurantId).populate('subscription.packageId');
-    let maxTables = 15;
-    let planName = 'Basic';
-    if (restaurant?.subscription?.packageId?.maxTables) {
-      maxTables = restaurant.subscription.packageId.maxTables;
-      planName = restaurant.subscription.packageId.name || restaurant.subscription.packageName || 'Basic';
-    } else if (restaurant?.subscription?.packageName) {
-      planName = restaurant.subscription.packageName;
-      const Package = require('../models/Package');
-      const pkg = await Package.findOne({ name: new RegExp(`^${restaurant.subscription.packageName}$`, 'i') });
-      if (pkg?.maxTables) maxTables = pkg.maxTables;
-    }
-    if (maxTables === 15) {
-      if (planName.toLowerCase() === 'standard') maxTables = 50;
-      else if (planName.toLowerCase() === 'premium') maxTables = 150;
-    }
+    const { maxTables, planName } = resolveTableLimit(restaurant);
 
     const currentTableCount = await Table.countDocuments({ restaurantId });
 

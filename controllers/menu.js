@@ -435,10 +435,10 @@ exports.getPublicMenu = async (req, res) => {
 
     let restaurant = await Restaurant.findOne({
       'website.subdomain': { $regex: new RegExp(`^${cleanSubdomain}$`, 'i') }
-    }).select('_id name status logo website socialLinks googleReviewLink portalSettings settings');
+    }).select('_id name status logo website socialLinks googleReviewLink portalSettings settings subscription');
 
     if (!restaurant && mongoose.isValidObjectId(cleanSubdomain)) {
-      restaurant = await Restaurant.findById(cleanSubdomain).select('_id name status logo website socialLinks googleReviewLink portalSettings settings');
+      restaurant = await Restaurant.findById(cleanSubdomain).select('_id name status logo website socialLinks googleReviewLink portalSettings settings subscription');
     }
 
     if (!restaurant) {
@@ -495,6 +495,43 @@ exports.getPublicMenu = async (req, res) => {
       return true;
     });
 
+    // 5. Restrict customer portal features strictly based on restaurant package
+    const Package = require('../models/Package');
+    let packageFeatures = [];
+    let pName = (restaurant.subscription?.packageName || '').toLowerCase();
+
+    if (restaurant.subscription?.packageId) {
+      const pkg = await Package.findById(restaurant.subscription.packageId);
+      if (pkg?.features) packageFeatures = pkg.features;
+      if (pkg?.name) pName = pkg.name.toLowerCase();
+    } else if (restaurant.subscription?.packageName) {
+      const pkg = await Package.findOne({ name: new RegExp(`^${restaurant.subscription.packageName}$`, 'i') });
+      if (pkg?.features) packageFeatures = pkg.features;
+    }
+
+    const isTrial = pName.includes('trial') || pName.includes('free');
+    const isEnterprise = pName.includes('enterprise');
+    const hasFeature = (key) => isTrial || isEnterprise || packageFeatures.includes(key);
+
+    // Apply strict module restrictions to public response
+    const finalOffers = hasFeature('offers_promos') ? offers : [];
+    const rawPortal = restaurant.portalSettings ? (restaurant.portalSettings.toObject ? restaurant.portalSettings.toObject() : { ...restaurant.portalSettings }) : {};
+
+    if (!hasFeature('table_games') && rawPortal.tableGames) {
+      rawPortal.tableGames.enabled = false;
+    }
+    if (!hasFeature('social_campaign') && rawPortal.socialCampaign) {
+      rawPortal.socialCampaign.enabled = false;
+    }
+    if (!hasFeature('wifi_sharing') && rawPortal.wifi) {
+      rawPortal.wifi.enabled = false;
+    }
+    if (!hasFeature('waiter_request') && rawPortal.waiterRequest) {
+      rawPortal.waiterRequest.enabled = false;
+    }
+
+    const finalGoogleReview = hasFeature('google_review') ? (restaurant.googleReviewLink || '') : '';
+
     return res.status(200).json({
       success: true,
       data: {
@@ -503,15 +540,16 @@ exports.getPublicMenu = async (req, res) => {
           name: restaurant.name,
           logo: restaurant.logo,
           subdomain: restaurant.website?.subdomain,
-          portalSettings: restaurant.portalSettings || {},
+          portalSettings: rawPortal,
           socialLinks: restaurant.socialLinks || {},
-          googleReviewLink: restaurant.googleReviewLink || '',
-          settings: restaurant.settings || {}
+          googleReviewLink: finalGoogleReview,
+          settings: restaurant.settings || {},
+          packageName: restaurant.subscription?.packageName || 'Starter Plan'
         },
         categories,
         items,
         combos,
-        offers
+        offers: finalOffers
       }
     });
   } catch (error) {
