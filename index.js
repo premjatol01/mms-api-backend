@@ -80,6 +80,7 @@ app.use('/api/cms', require('./routes/cms'));
 app.use('/api/biz-growth', require('./routes/bizGrowth'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/otp', require('./routes/otp'));
+app.use('/api/webhook', require('./routes/webhook'));
 app.use('/api/test', require('./routes/testApi'));
 
 // Basic health check route
