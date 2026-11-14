@@ -5,6 +5,7 @@ const Package = require('../models/Package');
 const RenewalRequest = require('../models/RenewalRequest');
 const SubscriptionTicket = require('../models/SubscriptionTicket');
 const PlatformSettings = require('../models/PlatformSettings');
+const { sendNotification } = require('../utils/notificationHelper');
 
 // Helper to determine real-time status of a subscription
 function computeRealtimeStatus(sub) {
@@ -385,6 +386,16 @@ exports.renewSubscription = async (req, res) => {
       await restaurant.save();
     }
 
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: subscription.restaurantId,
+      category: 'subscription',
+      title: 'Subscription Renewed',
+      message: `Your subscription has been extended until ${newEnd.toLocaleDateString()}.`,
+      actionUrl: '/subscription',
+      metadata: { subscriptionId: subscription._id },
+    }).catch((err) => console.error(err?.message));
+
     res.status(200).json({ 
       success: true, 
       data: subscription, 
@@ -435,6 +446,16 @@ exports.changePackage = async (req, res) => {
       await restaurant.save();
     }
 
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: subscription.restaurantId,
+      category: 'subscription',
+      title: 'Plan Updated',
+      message: `Your subscription tier has been upgraded to ${pkg.name}.`,
+      actionUrl: '/subscription',
+      metadata: { subscriptionId: subscription._id, planName: pkg.name },
+    }).catch((err) => console.error(err?.message));
+
     res.status(200).json({ 
       success: true, 
       data: subscription, 
@@ -464,6 +485,16 @@ exports.cancelSubscription = async (req, res) => {
       restaurant.subscription.status = 'cancelled';
       await restaurant.save();
     }
+
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: subscription.restaurantId,
+      category: 'subscription',
+      title: 'Subscription Cancelled',
+      message: 'Your subscription has been cancelled. Please contact super admin to reactivate.',
+      actionUrl: '/subscription',
+      metadata: { subscriptionId: subscription._id },
+    }).catch((err) => console.error(err?.message));
 
     res.status(200).json({ 
       success: true, 
@@ -507,6 +538,16 @@ exports.reactivateSubscription = async (req, res) => {
       restaurant.subscription.startDate = subscription.startDate;
       await restaurant.save();
     }
+
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: subscription.restaurantId,
+      category: 'subscription',
+      title: 'Subscription Reactivated! 🎉',
+      message: 'Your subscription is now active again. Enjoy all features!',
+      actionUrl: '/subscription',
+      metadata: { subscriptionId: subscription._id },
+    }).catch((err) => console.error(err?.message));
 
     res.status(200).json({ 
       success: true, 
@@ -634,6 +675,19 @@ exports.reviewPaymentRequest = async (req, res) => {
       };
       await restaurant.save();
     }
+
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: request.restaurantId,
+      category: 'subscription',
+      title: finalStatus === 'confirmed' ? 'Subscription Confirmed! 🎉' : 'Payment Verification Update',
+      message:
+        finalStatus === 'confirmed'
+          ? `Your payment for ${request.planName} has been approved and activated.`
+          : `Your payment verification was not approved: ${reviewNote || 'Please contact super admin.'}`,
+      actionUrl: '/subscription',
+      metadata: { renewalId: request._id, status: finalStatus },
+    }).catch((err) => console.error(err?.message));
 
     res.status(200).json({
       success: true,

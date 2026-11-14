@@ -1,5 +1,6 @@
 const Restaurant = require('../models/Restaurant');
 const Package = require('../models/Package');
+const { sendNotification } = require('../utils/notificationHelper');
 const Subscription = require('../models/Subscription');
 const RenewalRequest = require('../models/RenewalRequest');
 const SubscriptionTicket = require('../models/SubscriptionTicket');
@@ -205,6 +206,15 @@ exports.submitPaymentProof = async (req, res) => {
         features: pkg?.features || []
       });
 
+      sendNotification({
+        recipientType: 'super_admin',
+        category: 'subscription',
+        title: 'Free Trial Activated',
+        message: `${restaurant.name} activated their 1-Month Free Trial.`,
+        actionUrl: '/subscriptions',
+        metadata: { restaurantId: restaurant._id, planName: '1-Month Free Trial' }
+      }).catch((err) => console.error(err?.message));
+
       return res.status(200).json({
         success: true,
         data: sub,
@@ -252,6 +262,15 @@ exports.submitPaymentProof = async (req, res) => {
       status: 'pending'
     });
 
+    sendNotification({
+      recipientType: 'super_admin',
+      category: 'subscription',
+      title: 'New Subscription Payment Proof',
+      message: `${restaurant.name} submitted payment proof of ₹${renewal.amount} for ${renewal.planName}.`,
+      actionUrl: '/subscriptions',
+      metadata: { renewalId: renewal._id, restaurantId: restaurant._id, amount: renewal.amount }
+    }).catch((err) => console.error(err?.message));
+
     res.status(201).json({
       success: true,
       data: renewal,
@@ -296,6 +315,15 @@ exports.createTicket = async (req, res) => {
       paymentRequestId: paymentRequestId || null,
       status: 'open'
     });
+
+    sendNotification({
+      recipientType: 'super_admin',
+      category: 'ticket',
+      title: `Support Ticket: ${ticketNumber}`,
+      message: `${restaurant.name}: "${ticket.subject}"`,
+      actionUrl: '/subscriptions',
+      metadata: { ticketId: ticket._id, restaurantId: restaurant._id }
+    }).catch((err) => console.error(err?.message));
 
     res.status(201).json({
       success: true,

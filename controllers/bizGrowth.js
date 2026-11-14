@@ -1,4 +1,5 @@
 const BizGrowth = require('../models/BizGrowth');
+const { sendNotification } = require('../utils/notificationHelper');
 
 // Extract YouTube video ID from various YouTube URL formats
 const extractYoutubeId = (url) => {
@@ -157,6 +158,18 @@ exports.createBizGrowth = async (req, res) => {
     });
 
     await resource.save();
+
+    if (resource.status === 'active') {
+      sendNotification({
+        recipientType: 'restaurant',
+        category: 'biz_growth',
+        title: 'New Biz Growth Resource Published',
+        message: `${resource.title} (${resource.category}) is now available in Biz Growth.`,
+        actionUrl: '/biz-growth',
+        broadcastAll: true,
+        metadata: { resourceId: resource._id, title: resource.title },
+      }).catch((err) => console.error('Biz growth notification error:', err?.message));
+    }
 
     res.status(201).json({
       success: true,

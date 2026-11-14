@@ -5,6 +5,7 @@ const Table = require('../models/Table');
 const Restaurant = require('../models/Restaurant');
 const Customer = require('../models/Customer');
 const { emitToRestaurant, emitToTable } = require('../socket');
+const { sendNotification } = require('../utils/notificationHelper');
 
 /**
  * Finds or creates a customer record for a restaurant and updates visit/spend activity
@@ -518,6 +519,16 @@ exports.placePublicOrder = async (req, res) => {
       orders: allSessionOrders,
       order
     });
+
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: restaurant._id,
+      category: 'order',
+      title: `New Order at ${table.tableNo || table.tableId || 'Table'}`,
+      message: `${order.items.length} item(s) ordered • Total ₹${order.total || 0}`,
+      actionUrl: '/orders',
+      metadata: { orderId: order._id, tableId: table._id, total: order.total },
+    }).catch((err) => console.error('Order notification error:', err?.message));
 
     return res.status(201).json({
       success: true,
@@ -1041,6 +1052,16 @@ exports.createAdminManualOrder = async (req, res) => {
       order
     });
 
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: restaurantId,
+      category: 'order',
+      title: `Manual Order at ${table.tableNo || table.tableId || 'Table'}`,
+      message: `${order.items.length} item(s) ordered • Total ₹${order.total || 0}`,
+      actionUrl: '/orders',
+      metadata: { orderId: order._id, tableId: table._id, total: order.total },
+    }).catch((err) => console.error('Order notification error:', err?.message));
+
     return res.status(201).json({ success: true, data: order });
   } catch (error) {
     console.error('Error creating manual order:', error);
@@ -1522,6 +1543,16 @@ exports.requestWaiter = async (req, res) => {
       note,
       requestedAt: new Date(),
     });
+
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: restaurant._id,
+      category: 'waiter_call',
+      title: `Service Call from ${tableName}`,
+      message: `${serviceType || 'Waiter requested'}${note ? `: "${note}"` : ''}`,
+      actionUrl: '/tables',
+      metadata: { tableId: table._id, serviceType },
+    }).catch((err) => console.error('Waiter notification error:', err?.message));
 
     return res.status(200).json({
       success: true,

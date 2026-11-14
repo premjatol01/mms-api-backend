@@ -1,4 +1,5 @@
 const Lead = require('../models/Lead');
+const { sendNotification } = require('../utils/notificationHelper');
 
 // Get all leads with pagination, search, and filters
 exports.getLeads = async (req, res) => {
@@ -108,6 +109,16 @@ exports.createLead = async (req, res) => {
 
     const lead = new Lead(leadData);
     await lead.save();
+
+    // Real-time notification to Super Admin
+    sendNotification({
+      recipientType: 'super_admin',
+      category: 'lead',
+      title: 'New Lead Registered',
+      message: `${lead.restaurantName || 'Prospect'} (${lead.contactPerson || 'Lead'}) reached out for onboarding.`,
+      actionUrl: '/leads',
+      metadata: { leadId: lead._id, restaurantName: lead.restaurantName, phone: lead.phone },
+    }).catch((err) => console.error('Lead notification error:', err?.message));
     
     res.status(201).json(lead);
   } catch (error) {

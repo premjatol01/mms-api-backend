@@ -32,6 +32,17 @@ function initSocket(server) {
 
   io.on("connection", (socket) => {
     // -------------------------------------------------------------
+    // Super Admin Room: Joined by platform super admin dashboard
+    // -------------------------------------------------------------
+    socket.on("join_super_admin", () => {
+      socket.join("super_admin_room");
+    });
+
+    socket.on("leave_super_admin", () => {
+      socket.leave("super_admin_room");
+    });
+
+    // -------------------------------------------------------------
     // Restaurant Room: Joined by restaurant staff & admin dashboard
     // -------------------------------------------------------------
     socket.on("join_restaurant", (restaurantId) => {
@@ -108,10 +119,28 @@ function emitToTableAndRestaurant({ restaurantId, tableId, event, data }) {
   }
 }
 
+/**
+ * Emits an event to all super admin dashboard sockets.
+ */
+function emitToSuperAdmin(event, data) {
+  if (!io) return;
+  io.to("super_admin_room").emit(event, data);
+}
+
+/**
+ * Emits an event to all connected restaurant dashboards (e.g. system announcements / new biz growth).
+ */
+function emitToAllRestaurants(event, data) {
+  if (!io) return;
+  io.emit(event, data);
+}
+
 module.exports = {
   initSocket,
   getIO,
   emitToRestaurant,
   emitToTable,
   emitToTableAndRestaurant,
+  emitToSuperAdmin,
+  emitToAllRestaurants,
 };
