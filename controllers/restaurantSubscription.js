@@ -131,6 +131,87 @@ exports.submitPaymentProof = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Restaurant not found' });
     }
 
+    const {
+      packageId,
+      packageName,
+      duration,
+      durationDays,
+      durationDisplay,
+      amount,
+      transactionRef,
+      userNote,
+      requestType
+    } = req.body;
+
+    const numAmount = Number(amount) || 0;
+    const isFreeTrial = numAmount === 0 || (packageName && packageName.toLowerCase().includes('free trial'));
+
+    // --- INSTANT 1-MONTH FREE TRIAL ACTIVATION ---
+    if (isFreeTrial) {
+      // Check if restaurant already has used trial before
+      const existingTrial = await Subscription.findOne({
+        restaurantId,
+        $or: [{ price: 0 }, { packageName: /free trial/i }]
+      });
+
+      if (existingTrial && restaurant.subscription?.packageName?.toLowerCase().includes('trial')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Your restaurant has already activated the 1-Month Free Trial. Please select a paid plan to continue.'
+        });
+      }
+
+      let pkg = null;
+      if (packageId) pkg = await Package.findById(packageId);
+      if (!pkg) pkg = await Package.findOne({ name: /1 Month Free Trial/i });
+
+      const trialDays = 30;
+      const now = new Date();
+      const endDate = new Date(now);
+      endDate.setDate(endDate.getDate() + trialDays);
+
+      // Directly update restaurant subscription
+      restaurant.subscription = {
+        packageId: pkg?._id || null,
+        packageName: pkg?.name || '1 Month Free Trial',
+        duration: '30_days',
+        durationDisplay: '30 Days Free Trial',
+        price: 0,
+        startDate: now,
+        endDate: endDate,
+        status: 'active'
+      };
+      await restaurant.save();
+
+      // Deactivate any old active subscription record
+      await Subscription.updateMany(
+        { restaurantId: restaurant._id, status: 'active' },
+        { $set: { status: 'cancelled' } }
+      );
+
+      const sub = await Subscription.create({
+        restaurantId: restaurant._id,
+        restaurantName: restaurant.name,
+        adminName: restaurant.admin?.name || req.user.name,
+        adminEmail: restaurant.admin?.email || req.user.email,
+        packageId: pkg?._id,
+        packageName: pkg?.name || '1 Month Free Trial',
+        duration: trialDays,
+        durationDisplay: '30 Days Free Trial',
+        startDate: now,
+        endDate: endDate,
+        price: 0,
+        status: 'active',
+        features: pkg?.features || []
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: sub,
+        message: '🎉 Congratulations! Your 1-Month Free Trial has been activated successfully with full features for 30 days!'
+      });
+    }
+
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Please upload your payment screenshot.' });
     }
@@ -143,18 +224,6 @@ exports.submitPaymentProof = async (req, res) => {
         message: 'A payment verification request is already pending. Super admin will review it shortly.'
       });
     }
-
-    const {
-      packageId,
-      packageName,
-      duration,
-      durationDays,
-      durationDisplay,
-      amount,
-      transactionRef,
-      userNote,
-      requestType
-    } = req.body;
 
     const screenshotUrl = `/uploads/subscription-proofs/${req.file.filename}`;
 
