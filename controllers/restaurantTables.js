@@ -17,8 +17,9 @@ async function buildQRImageBuffer(scanUrl, template) {
   let templateBuffer = null;
   let templateMeta = null;
 
-  if (template) {
-    const templatePath = path.join(__dirname, '..', 'public', template.imagePath);
+  if (template && template.imagePath) {
+    const cleanRelativePath = template.imagePath.replace(/^[\\/]+/, '');
+    const templatePath = path.resolve(__dirname, '..', 'public', cleanRelativePath);
     if (fs.existsSync(templatePath)) {
       templateBuffer = fs.readFileSync(templatePath);
       templateMeta = await sharp(templateBuffer).metadata();
@@ -37,19 +38,11 @@ async function buildQRImageBuffer(scanUrl, template) {
       color: { dark: '#000000', light: '#ffffff' }
     });
 
-    const format = (templateMeta.format || '').toLowerCase();
-    let pipeline = sharp(templateBuffer)
-      .composite([{ input: qrBuffer, left: leftPx, top: topPx }]);
-
-    if (format === 'png') {
-      pipeline = pipeline.png({ compressionLevel: 6, adaptiveFiltering: true });
-    } else if (format === 'jpeg' || format === 'jpg') {
-      pipeline = pipeline.jpeg({ quality: 98, chromaSubsampling: '4:4:4' });
-    } else if (format === 'webp') {
-      pipeline = pipeline.webp({ quality: 98, lossless: true });
-    }
-
-    return pipeline.toBuffer();
+    // Always output a standard, universally supported PNG image
+    return sharp(templateBuffer)
+      .composite([{ input: qrBuffer, left: leftPx, top: topPx }])
+      .png({ compressionLevel: 6, adaptiveFiltering: true })
+      .toBuffer();
   }
 
   // Plain QR fallback
