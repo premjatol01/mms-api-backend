@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+require('./QrCode');
 
 const tableSchema = new mongoose.Schema({
   restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true },

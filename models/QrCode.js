@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const qrCodeSchema = new mongoose.Schema({
   restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant' },
   name: { type: String },
-  type: { type: String, enum: ['template', 'premium', 'custom'], default: 'template' },
+  type: { type: String, enum: ['template', 'standard', 'plain', 'premium', 'custom'], default: 'standard' },
   layout: { type: String },
   templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'QRTemplate', default: null },
   status: { type: String, enum: ['available', 'assigned', 'inactive'], default: 'available' },

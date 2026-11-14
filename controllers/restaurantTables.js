@@ -335,17 +335,30 @@ exports.updateTable = async (req, res) => {
       }
     }
 
+    const payload = {};
+    if (userLabel) {
+      payload.tableNo = userLabel;
+      payload.tableId = userLabel;
+    }
+    if (status) payload.status = status;
+    if (qrCodeId !== undefined) payload.qrCodeId = qrCodeId || null;
+
     // Handle templateId update for table's QR code
     if (templateId !== undefined) {
-      const targetTemplateId = (templateId && templateId !== 'plain' && templateId !== 'normal') ? templateId : null;
+      const isPlain = templateId === 'plain' || templateId === 'normal' || templateId === null;
+      const targetTemplateId = (!isPlain && templateId) ? templateId : null;
+
       if (table.qrCodeId) {
+        // Table already has a QR code assigned -> update its template & regenerate image
         const qrDoc = await QrCode.findById(table.qrCodeId);
         if (qrDoc) {
           qrDoc.templateId = targetTemplateId;
+          qrDoc.type = targetTemplateId ? 'template' : 'standard';
           await qrDoc.save();
           await regenerateQRImage(qrDoc, restaurant, table._id);
         }
-      } else if (targetTemplateId !== undefined && templateId !== null) {
+      } else if (qrCodeId !== null) {
+        // Table has no QR code yet and user is not unassigning -> generate & assign QR code
         const scanUrl = buildScanUrl(restaurant, table._id);
         const qrTemplate = targetTemplateId ? await QRTemplate.findById(targetTemplateId) : null;
         const qrDoc = new QrCode({
@@ -353,6 +366,7 @@ exports.updateTable = async (req, res) => {
           tableId: table._id,
           name: `${userLabel || table.tableNo || 'Table'} QR`,
           status: 'assigned',
+          type: targetTemplateId ? 'template' : 'standard',
           templateId: targetTemplateId,
           scanUrl
         });
@@ -362,18 +376,12 @@ exports.updateTable = async (req, res) => {
         fs.writeFileSync(filepath, imageBuffer);
         qrDoc.imageUrl = `/uploads/table-qrs/${filename}`;
         await qrDoc.save();
+
         table.qrCodeId = qrDoc._id;
         await table.save();
+        payload.qrCodeId = qrDoc._id;
       }
     }
-
-    const payload = {};
-    if (userLabel) {
-      payload.tableNo = userLabel;
-      payload.tableId = userLabel;
-    }
-    if (status) payload.status = status;
-    if (qrCodeId !== undefined) payload.qrCodeId = qrCodeId || null;
 
     const updated = await Table.findByIdAndUpdate(req.params.id, payload, { new: true }).populate('qrCodeId');
     res.status(200).json({ success: true, data: updated });
