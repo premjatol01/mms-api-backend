@@ -69,6 +69,7 @@ app.use('/api/packages', require('./routes/packages'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));
 app.use('/api/cms', require('./routes/cms'));
 app.use('/api/biz-growth', require('./routes/bizGrowth'));
+app.use('/api/test', require('./routes/testApi'));
 
 // Basic health check route
 app.get('/', (req, res) => {
