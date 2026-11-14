@@ -152,6 +152,41 @@ const restaurantSchema = new mongoose.Schema({
       enableCart: { type: Boolean, default: true },
       enableFloatingCart: { type: Boolean, default: true },
       enableGames: { type: Boolean, default: true }
+    },
+    tableGames: {
+      enabled: { type: Boolean, default: true },
+      trivia: {
+        enabled: { type: Boolean, default: true },
+        title: { type: String, default: "Foodie Trivia Showdown" },
+        tagline: { type: String, default: "Test culinary trivia with table mates" },
+        status: { type: String, default: "Active" },
+        timerSeconds: { type: Number, default: 15 },
+        questions: [{
+          id: { type: String },
+          question: { type: String },
+          options: [{ type: String }],
+          correctIndex: { type: Number },
+          explanation: { type: String }
+        }]
+      },
+      dareSpin: {
+        enabled: { type: Boolean, default: true },
+        title: { type: String, default: "Table Dare & Spin" },
+        tagline: { type: String, default: "Spin the wheel for fun dinner challenges" },
+        status: { type: String, default: "Active" },
+        dares: [{
+          id: { type: String },
+          text: { type: String },
+          color: { type: String }
+        }]
+      },
+      ticTacToe: {
+        enabled: { type: Boolean, default: true },
+        title: { type: String, default: "Table Tic-Tac-Toe" },
+        tagline: { type: String, default: "Quick matches while waiting for your order" },
+        status: { type: String, default: "Active" },
+        mode: { type: String, default: "pvp" }
+      }
     }
   }
 }, { timestamps: true });
