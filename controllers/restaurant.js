@@ -225,7 +225,7 @@ exports.createRestaurant = async (req, res) => {
     tempHashedPassword = await bcrypt.hash(tempPassword, salt);
 
     if (req.file) {
-      data.logo = `/uploads/restaurants/${req.file.filename}`;
+      data.logo = req.file.fileUrl || (req.file.path?.startsWith('http') ? req.file.path : `/uploads/restaurants/${req.file.filename}`);
     }
 
     // 5. Create the Restaurant
@@ -444,7 +444,7 @@ exports.updateRestaurant = async (req, res) => {
     }
     
     if (req.file) {
-      data.logo = `/uploads/restaurants/${req.file.filename}`;
+      data.logo = req.file.fileUrl || (req.file.path?.startsWith('http') ? req.file.path : `/uploads/restaurants/${req.file.filename}`);
     }
 
     const restaurant = await Restaurant.findByIdAndUpdate(req.params.id, data, { new: true, runValidators: true });

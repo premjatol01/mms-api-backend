@@ -43,7 +43,7 @@ exports.uploadTemplate = async (req, res) => {
 
     const newTemplate = new QRTemplate({
       name,
-      imagePath: `/uploads/qrcodes/${req.file.filename}`,
+      imagePath: req.file.fileUrl || (req.file.path?.startsWith('http') ? req.file.path : `/uploads/qrcodes/${req.file.filename}`),
       status: 'active'
     });
 

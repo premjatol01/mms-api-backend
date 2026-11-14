@@ -28,6 +28,7 @@ const deleteFile = (urlPath) => {
  */
 const buildUrl = (req, filePath) => {
   if (!filePath) return null;
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
   const base = `${req.protocol}://${req.get('host')}`;
   return `${base}${filePath}`;
 };
@@ -365,7 +366,7 @@ const uploadLogo = async (req, res) => {
     // Delete old logo from disk
     deleteFile(restaurant.logo);
 
-    const logoPath = `/uploads/restaurants/${req.file.filename}`;
+    const logoPath = req.file.fileUrl || (req.file.path?.startsWith('http') ? req.file.path : `/uploads/restaurants/${req.file.filename}`);
     restaurant.logo = logoPath;
     await restaurant.save();
 
@@ -420,7 +421,7 @@ const uploadCover = async (req, res) => {
     // Delete old cover from disk
     deleteFile(restaurant.coverImage);
 
-    const coverPath = `/uploads/restaurants/${req.file.filename}`;
+    const coverPath = req.file.fileUrl || (req.file.path?.startsWith('http') ? req.file.path : `/uploads/restaurants/${req.file.filename}`);
     restaurant.coverImage = coverPath;
     await restaurant.save();
 

@@ -34,7 +34,7 @@ router.use(protect, roleGuard('restaurant_admin'));
 router.post('/upload-image', menuUploader.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'No image provided' });
   const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-  const url = `${baseUrl}/uploads/menu/${req.file.filename}`;
+  const url = req.file.fileUrl || (req.file.path && req.file.path.startsWith('http') ? req.file.path : `${baseUrl}/uploads/menu/${req.file.filename}`);
   res.json({ success: true, data: { url } });
 });
 

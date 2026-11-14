@@ -16,21 +16,8 @@ const {
   verifyTableSession
 } = require('../controllers/restaurant');
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const dir = path.join(__dirname, '../public/uploads/restaurants');
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    cb(null, dir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage: storage });
+const { createUploader } = require('../middleware/upload');
+const upload = createUploader('restaurants');
 
 router.route('/bulk/status')
   .patch(bulkUpdateStatus);

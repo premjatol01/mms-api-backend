@@ -92,6 +92,24 @@ async function regenerateQRImage(qrDoc, restaurant, tableLabel) {
 
   const imageBuffer = await buildQRImageBuffer(scanUrl, template);
 
+  const { uploadToCloudinary, isCloudinaryConfigured } = require('../config/cloudinary');
+  if (isCloudinaryConfigured()) {
+    try {
+      const cdnUrl = await uploadToCloudinary(imageBuffer, {
+        folder: 'table-qrs',
+        public_id: `qr-${restaurant._id}-${qrDoc._id}`,
+        format: 'png'
+      });
+      if (cdnUrl) {
+        qrDoc.imageUrl = cdnUrl;
+        await qrDoc.save();
+        return qrDoc;
+      }
+    } catch (e) {
+      console.warn('Cloudinary QR upload failed, falling back to local disk:', e.message);
+    }
+  }
+
   const filename = `qr-${restaurant._id}-${qrDoc._id}.png`;
   const filepath = path.join(uploadDir, filename);
   fs.writeFileSync(filepath, imageBuffer);
@@ -370,12 +388,8 @@ exports.updateTable = async (req, res) => {
           templateId: targetTemplateId,
           scanUrl
         });
-        const imageBuffer = await buildQRImageBuffer(scanUrl, qrTemplate);
-        const filename = `qr-${req.user.restaurantId}-${qrDoc._id}.png`;
-        const filepath = path.join(uploadDir, filename);
-        fs.writeFileSync(filepath, imageBuffer);
-        qrDoc.imageUrl = `/uploads/table-qrs/${filename}`;
         await qrDoc.save();
+        await regenerateQRImage(qrDoc, restaurant, table._id);
 
         table.qrCodeId = qrDoc._id;
         await table.save();
