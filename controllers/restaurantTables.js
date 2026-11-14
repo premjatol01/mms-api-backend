@@ -56,19 +56,42 @@ async function buildQRImageBuffer(scanUrl, template) {
 
 /**
  * Shared helper: build the correct scan URL for a restaurant + tableId label.
- * Format: http(s)://{subdomain}.{baseDomain}/menu/{tableLabel}
- * Falls back to plain domain path if no subdomain is configured.
+ * Supports:
+ * 1. Path Mode (for free Vercel / Render testing):
+ *    http(s)://{baseDomain}/{subdomain}/menu/{tableLabel}
+ * 2. Wildcard Subdomain Mode (for custom domains like tablly.com):
+ *    http(s)://{subdomain}.{baseDomain}/menu/{tableLabel}
  */
 function buildScanUrl(restaurant, tableLabel) {
-  const baseDomain = process.env.BASE_DOMAIN || 'localhost:3000';
+  const rawDomain = (process.env.BASE_DOMAIN || 'localhost:3000')
+    .replace(/^https?:\/\//, '')
+    .replace(/\/+$/, '');
   const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-  const subdomain = restaurant.website?.subdomain;
+  const subdomain = (restaurant.website?.subdomain || '').trim();
 
-  if (subdomain) {
-    return `${protocol}://${subdomain}.${baseDomain}/menu/${encodeURIComponent(tableLabel)}`;
+  // Detect whether we are on shared free platforms without wildcard DNS
+  const isSharedPlatform =
+    rawDomain.includes('vercel.app') ||
+    rawDomain.includes('onrender.com') ||
+    rawDomain.includes('localhost') ||
+    process.env.ROUTING_MODE === 'path';
+
+  const isSubdomainMode =
+    process.env.ROUTING_MODE === 'subdomain' ||
+    (!isSharedPlatform && !rawDomain.includes(':'));
+
+  // 1. Wildcard subdomain mode: https://spicegarden.tablly.com/menu/Table 01
+  if (isSubdomainMode && subdomain) {
+    return `${protocol}://${subdomain}.${rawDomain}/menu/${encodeURIComponent(tableLabel)}`;
   }
-  // No subdomain configured yet — use a fallback path
-  return `${protocol}://${baseDomain}/restaurant/${restaurant._id}/menu/${encodeURIComponent(tableLabel)}`;
+
+  // 2. Path mode (Vercel, Render, Localhost): https://tablly-web.vercel.app/spicegarden/menu/Table 01
+  if (subdomain) {
+    return `${protocol}://${rawDomain}/${subdomain}/menu/${encodeURIComponent(tableLabel)}`;
+  }
+
+  // Fallback if no subdomain configured yet
+  return `${protocol}://${rawDomain}/restaurant/${restaurant._id}/menu/${encodeURIComponent(tableLabel)}`;
 }
 
 /**

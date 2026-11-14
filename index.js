@@ -17,22 +17,29 @@ connectDB();
 
 const app = express();
 
-// Global Middleware
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [];
+// Global Middleware & Dynamic CORS Handling
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
+  if (origin.includes('.vercel.app')) return true;
+  if (origin.includes('.onrender.com')) return true;
+  if (process.env.BASE_DOMAIN) {
+    const baseHost = process.env.BASE_DOMAIN.split(':')[0].trim();
+    if (baseHost && origin.includes(baseHost)) return true;
+  }
+  return true; // Permit preview & deployment origins with credentials
+}
 
 const path = require('path');
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (
-      allowedOrigins.includes(origin) ||
-      origin.includes('localhost:') ||
-      (process.env.BASE_DOMAIN && origin.includes(process.env.BASE_DOMAIN.split(':')[0]))
-    ) {
-      return callback(null, true);
-    }
-    return callback(null, true);
+    callback(null, isOriginAllowed(origin));
   },
   credentials: true // Important for sending cookies
 }));
