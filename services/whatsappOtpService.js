@@ -61,43 +61,51 @@ async function sendWhatsAppOtp(mobile, otpCode) {
 
     const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
 
-    // Standard Meta Authentication Template Payload with Copy Code button
+    const isHelloWorld = templateName === 'hello_world';
+
+    // Standard Meta Template Payload
+    const templateObj = {
+      name: templateName,
+      language: {
+        code: process.env.WHATSAPP_LANGUAGE_CODE || 'en_US',
+      },
+    };
+
+    // If not hello_world, include body OTP parameter
+    if (!isHelloWorld) {
+      templateObj.components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: String(otpCode),
+            },
+          ],
+        },
+        {
+          type: 'button',
+          sub_type: 'url',
+          index: '0',
+          parameters: [
+            {
+              type: 'text',
+              text: String(otpCode),
+            },
+          ],
+        },
+      ];
+    }
+
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       to: formattedPhone,
       type: 'template',
-      template: {
-        name: templateName,
-        language: {
-          code: process.env.WHATSAPP_LANGUAGE_CODE || 'en_US',
-        },
-        components: [
-          {
-            type: 'body',
-            parameters: [
-              {
-                type: 'text',
-                text: String(otpCode),
-              },
-            ],
-          },
-          {
-            type: 'button',
-            sub_type: 'url',
-            index: '0',
-            parameters: [
-              {
-                type: 'text',
-                text: String(otpCode),
-              },
-            ],
-          },
-        ],
-      },
+      template: templateObj,
     };
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -106,7 +114,24 @@ async function sendWhatsAppOtp(mobile, otpCode) {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    let data = await response.json();
+
+    // If button component caused mismatch, retry with body-only
+    if (!response.ok && payload.template?.components?.length > 1) {
+      payload.template.components = [payload.template.components[0]];
+      const retryRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      if (retryRes.ok) {
+        data = await retryRes.json();
+        response = retryRes;
+      }
+    }
 
     if (!response.ok) {
       console.error('[WhatsApp Service Error]:', data);
