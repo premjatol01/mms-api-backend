@@ -18,11 +18,24 @@ async function buildQRImageBuffer(scanUrl, template) {
   let templateMeta = null;
 
   if (template && template.imagePath) {
-    const cleanRelativePath = template.imagePath.replace(/^[\\/]+/, '');
-    const templatePath = path.resolve(__dirname, '..', 'public', cleanRelativePath);
-    if (fs.existsSync(templatePath)) {
-      templateBuffer = fs.readFileSync(templatePath);
-      templateMeta = await sharp(templateBuffer).metadata();
+    if (template.imagePath.startsWith('http://') || template.imagePath.startsWith('https://')) {
+      try {
+        const resp = await fetch(template.imagePath);
+        if (resp.ok) {
+          const arrayBuffer = await resp.arrayBuffer();
+          templateBuffer = Buffer.from(arrayBuffer);
+          templateMeta = await sharp(templateBuffer).metadata();
+        }
+      } catch (err) {
+        console.warn('Could not fetch remote template image:', err.message);
+      }
+    } else {
+      const cleanRelativePath = template.imagePath.replace(/^[\\/]+/, '');
+      const templatePath = path.resolve(__dirname, '..', 'public', cleanRelativePath);
+      if (fs.existsSync(templatePath)) {
+        templateBuffer = fs.readFileSync(templatePath);
+        templateMeta = await sharp(templateBuffer).metadata();
+      }
     }
   }
 

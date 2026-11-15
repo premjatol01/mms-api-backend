@@ -1,6 +1,7 @@
 const QRTemplate = require('../models/QRTemplate');
 const path = require('path');
 const fs = require('fs');
+const { getFileUrl } = require('../middleware/upload');
 
 // @desc    Get all QR templates
 // @route   GET /api/qr-templates
@@ -41,9 +42,11 @@ exports.uploadTemplate = async (req, res) => {
       return res.status(400).json({ message: 'Template image is required' });
     }
 
+    const imageUrl = req.file.fileUrl || getFileUrl(req.file, 'qrcodes');
+
     const newTemplate = new QRTemplate({
       name,
-      imagePath: req.file.fileUrl || (req.file.path?.startsWith('http') ? req.file.path : `/uploads/qrcodes/${req.file.filename}`),
+      imagePath: imageUrl,
       status: 'active'
     });
 
