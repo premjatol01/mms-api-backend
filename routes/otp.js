@@ -49,11 +49,19 @@ router.post('/send', async (req, res) => {
         verified: false,
         expiresAt,
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
 
     // Send via WhatsApp service
     const dispatchResult = await sendWhatsAppOtp(cleanMobile, generatedOtp);
+
+    if (!dispatchResult.success) {
+      return res.status(502).json({
+        success: false,
+        message: dispatchResult.error || 'Failed to dispatch WhatsApp message',
+        mode: dispatchResult.mode,
+      });
+    }
 
     return res.status(200).json({
       success: true,
