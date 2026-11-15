@@ -43,13 +43,20 @@ async function sendWhatsAppOtp(mobile, otpCode) {
     console.log(` 💡 Note      : Meta API keys not set. Update .env when ready.`);
     console.log(divider + '\n');
 
-    const devCode = otpCode;
+    const devCode =
+      process.env.NODE_ENV !== 'production' ||
+      process.env.WHATSAPP_ACCESS_TOKEN === 'mock' ||
+      !isLiveConfigured
+        ? otpCode
+        : undefined;
 
     return {
       success: true,
       mode: 'mock',
       devCode,
-      message: `OTP generated (Test code: ${devCode})`,
+      message: devCode
+        ? `OTP generated (Test code: ${devCode})`
+        : 'OTP generated (Dev Mock mode - check server terminal)',
     };
   }
 
@@ -137,18 +144,12 @@ async function sendWhatsAppOtp(mobile, otpCode) {
 
     if (!response.ok) {
       console.error('[WhatsApp Service Error]:', data);
-      return {
-        success: false,
-        mode: 'live',
-        devCode: otpCode,
-        error: data.error?.message || 'Meta Cloud API rejected request',
-      };
+      throw new Error(data.error?.message || 'Meta Cloud API rejected request');
     }
 
     return {
       success: true,
       mode: 'live',
-      devCode: otpCode,
       messageId: data.messages?.[0]?.id,
       message: 'OTP delivered to your WhatsApp',
     };
@@ -157,7 +158,6 @@ async function sendWhatsAppOtp(mobile, otpCode) {
     return {
       success: false,
       mode: 'live',
-      devCode: otpCode,
       error: error.message,
     };
   }
