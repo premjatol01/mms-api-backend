@@ -114,9 +114,11 @@ router.post('/verify', async (req, res) => {
       });
     }
 
-    // Verification check (allow dev bypass 123456 or 1234 if in development)
+    // Verification check (allow dev bypass 123456 or 1234 if in mock/dev mode)
     const isDevBypass =
-      process.env.NODE_ENV !== 'production' &&
+      (process.env.NODE_ENV !== 'production' ||
+        process.env.WHATSAPP_ACCESS_TOKEN === 'mock' ||
+        !process.env.WHATSAPP_ACCESS_TOKEN) &&
       (cleanCode === '123456' || cleanCode === '1234');
 
     const isValid = record.otp === cleanCode || isDevBypass;

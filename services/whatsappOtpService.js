@@ -43,11 +43,20 @@ async function sendWhatsAppOtp(mobile, otpCode) {
     console.log(` 💡 Note      : Meta API keys not set. Update .env when ready.`);
     console.log(divider + '\n');
 
+    const devCode =
+      process.env.NODE_ENV !== 'production' ||
+      process.env.WHATSAPP_ACCESS_TOKEN === 'mock' ||
+      !isLiveConfigured
+        ? otpCode
+        : undefined;
+
     return {
       success: true,
       mode: 'mock',
-      devCode: process.env.NODE_ENV !== 'production' ? otpCode : undefined,
-      message: 'OTP generated (Dev Mock mode - check server terminal)',
+      devCode,
+      message: devCode
+        ? `OTP generated (Test code: ${devCode})`
+        : 'OTP generated (Dev Mock mode - check server terminal)',
     };
   }
 
