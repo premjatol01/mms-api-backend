@@ -22,46 +22,40 @@ async function sendWhatsAppOtp(mobile, otpCode) {
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
   const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'tablly_otp';
 
-  const isLiveConfigured = Boolean(
-    phoneId &&
-    accessToken &&
-    accessToken.trim() !== '' &&
-    accessToken !== 'mock' &&
-    !accessToken.startsWith('your_')
-  );
+  // Development mode flag:
+  // Enabled if OTP_DEV_MODE is 'true', WHATSAPP_ACCESS_TOKEN is 'mock' or missing, or NODE_ENV !== 'production'
+  const isDevMode =
+    process.env.OTP_DEV_MODE === 'true' ||
+    process.env.WHATSAPP_ACCESS_TOKEN === 'mock' ||
+    process.env.NODE_ENV !== 'production' ||
+    !phoneId ||
+    !accessToken ||
+    accessToken.trim() === '' ||
+    accessToken.startsWith('your_');
 
   // --------------------------------------------------------------------------
-  // DEV MOCK MODE: When keys are not yet configured in .env
+  // DEV MOCK MODE (For local development & testing)
   // --------------------------------------------------------------------------
-  if (!isLiveConfigured) {
+  if (isDevMode) {
     const divider = '═'.repeat(64);
     console.log('\n' + divider);
-    console.log(' 💬 [TABLLY WHATSAPP OTP - DEV MOCK]');
+    console.log(' 💬 [TABLLY WHATSAPP OTP - DEV MODE]');
     console.log(` 📱 Recipient : +91 ${cleanMobile}`);
     console.log(` 🔑 OTP Code  : ${otpCode}`);
     console.log(` ⏳ Valid for : 5 minutes`);
-    console.log(` 💡 Note      : Meta API keys not set. Update .env when ready.`);
+    console.log(` 💡 Dev Mode  : Passing OTP to frontend for testing (devCode)`);
     console.log(divider + '\n');
-
-    const devCode =
-      process.env.NODE_ENV !== 'production' ||
-      process.env.WHATSAPP_ACCESS_TOKEN === 'mock' ||
-      !isLiveConfigured
-        ? otpCode
-        : undefined;
 
     return {
       success: true,
       mode: 'mock',
-      devCode,
-      message: devCode
-        ? `OTP generated (Test code: ${devCode})`
-        : 'OTP generated (Dev Mock mode - check server terminal)',
+      devCode: otpCode,
+      message: `OTP generated for testing (Code: ${otpCode})`,
     };
   }
 
   // --------------------------------------------------------------------------
-  // LIVE MODE: Send via Meta WhatsApp Cloud API
+  // PRODUCTION LIVE MODE: Send via Meta WhatsApp Cloud API
   // --------------------------------------------------------------------------
   try {
     const formattedPhone = cleanMobile.startsWith('91')
