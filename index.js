@@ -67,7 +67,6 @@ app.use('/api/restaurant/subscription', require('./routes/restaurantSubscription
 app.use('/api/restaurant/analytics', require('./routes/restaurantAnalytics'));
 app.use('/api/restaurant', restaurantProfileRoutes);
 app.use('/api/menu', require('./routes/menu'));
-app.use('/api/design-requests', require('./routes/designRequests'));
 app.use('/api/leads', leadRoutes);
 app.use('/api/qr-templates', qrTemplateRoutes);
 app.use('/api/offers', require('./routes/offers'));
