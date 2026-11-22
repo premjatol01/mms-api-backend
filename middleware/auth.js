@@ -10,21 +10,31 @@ const protect = async (req, res, next) => {
   try {
     let token;
 
-    // 1. Prefer HTTP-only cookie (primary flow)
-    if (req.cookies?.jwt) {
-      token = req.cookies.jwt;
-    }
-    // 2. Fall back to Bearer token in Authorization header (e.g. Postman testing or cross-port fallback)
-    else if (req.headers.authorization?.startsWith('Bearer ')) {
+    // 1. Prefer Bearer token in Authorization header (explicit token sent by client app)
+    if (req.headers.authorization?.startsWith('Bearer ')) {
       token = req.headers.authorization.split(' ')[1];
+    }
+    // 2. Fall back to HTTP-only cookie
+    else if (req.cookies?.jwt) {
+      token = req.cookies.jwt;
     }
 
     if (!token) {
       return res.status(401).json({ success: false, message: 'Not authorized, no token' });
     }
 
-    // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tablly_super_secret_key_2026');
+    // Verify token with fallback between header and cookie if both are present
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'tablly_super_secret_key_2026');
+    } catch (tokenErr) {
+      // If header token failed and an alternative cookie exists, attempt verifying the cookie
+      if (req.cookies?.jwt && token !== req.cookies.jwt) {
+        decoded = jwt.verify(req.cookies.jwt, process.env.JWT_SECRET || 'tablly_super_secret_key_2026');
+      } else {
+        throw tokenErr;
+      }
+    }
 
     // Attach minimal user to request (avoid leaking password)
     const user = await User.findById(decoded.userId).select('-password');
