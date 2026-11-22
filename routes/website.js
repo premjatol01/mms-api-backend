@@ -21,7 +21,8 @@ const {
   updateInquiryStatus,
   submitPublicInquiry,
   getFooterConfig,
-  updateFooterConfig
+  updateFooterConfig,
+  resolveMapsUrl
 } = require('../controllers/website');
 
 const { createUploader } = require('../middleware/upload');
@@ -72,5 +73,8 @@ router.route('/inquiries')
   .get(getInquiries);
 
 router.patch('/inquiries/:id/status', updateInquiryStatus);
+
+// Google Maps URL Resolver
+router.post('/resolve-maps-url', resolveMapsUrl);
 
 module.exports = router;

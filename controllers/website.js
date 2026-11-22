@@ -1244,3 +1244,112 @@ exports.updateFooterConfig = async (req, res) => {
   }
 };
 
+/**
+ * Resolves a Google Maps link or short URL (e.g. maps.app.goo.gl/...) to exact latitude and longitude
+ * @route POST /api/restaurant/website/resolve-maps-url
+ */
+exports.resolveMapsUrl = async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url.trim())) {
+      return res.status(400).json({ success: false, message: 'Invalid or missing Google Maps URL.' });
+    }
+
+    const trimmedUrl = url.trim();
+
+    // Security check: only allow Google Maps related domains
+    const allowed = /(?:google\.[a-z.]+|goo\.gl|maps\.app\.goo\.gl)/i.test(trimmedUrl);
+    if (!allowed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid Google Maps link (e.g. maps.app.goo.gl or google.com/maps).'
+      });
+    }
+
+    const response = await fetch(trimmedUrl, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    const finalUrl = response.url || '';
+
+    // 1. Check final URL for coordinates (@lat,lng)
+    const atMatch = finalUrl.match(/@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/);
+    if (atMatch) {
+      const lat = parseFloat(atMatch[1]);
+      const lng = parseFloat(atMatch[2]);
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        return res.status(200).json({
+          success: true,
+          latitude: lat.toFixed(6),
+          longitude: lng.toFixed(6),
+          finalUrl
+        });
+      }
+    }
+
+    // 2. Query param coordinates (q=lat,lng or query=lat,lng or ll=lat,lng or destination=lat,lng)
+    const queryMatch = finalUrl.match(/[?&](?:q|query|ll|destination|daddr)=(-?\d{1,2}\.\d+)(?:%2C|,)(-?\d{1,3}\.\d+)/i);
+    if (queryMatch) {
+      const lat = parseFloat(queryMatch[1]);
+      const lng = parseFloat(queryMatch[2]);
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        return res.status(200).json({
+          success: true,
+          latitude: lat.toFixed(6),
+          longitude: lng.toFixed(6),
+          finalUrl
+        });
+      }
+    }
+
+    // 3. Fallback: Parse HTML body if coordinates are inside Google Maps metadata or static map link
+    const html = await response.text();
+
+    const staticMapMatch = html.match(/staticmap\?[^"']*center=(-?\d{1,2}\.\d+)%2C(-?\d{1,3}\.\d+)/i);
+    if (staticMapMatch) {
+      return res.status(200).json({
+        success: true,
+        latitude: parseFloat(staticMapMatch[1]).toFixed(6),
+        longitude: parseFloat(staticMapMatch[2]).toFixed(6),
+        finalUrl
+      });
+    }
+
+    const metaMatch = html.match(/\/maps\/place\/[^/]*\/@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/);
+    if (metaMatch) {
+      return res.status(200).json({
+        success: true,
+        latitude: parseFloat(metaMatch[1]).toFixed(6),
+        longitude: parseFloat(metaMatch[2]).toFixed(6),
+        finalUrl
+      });
+    }
+
+    const windowStateMatch = html.match(/\[null,null,(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)\]/);
+    if (windowStateMatch) {
+      return res.status(200).json({
+        success: true,
+        latitude: parseFloat(windowStateMatch[1]).toFixed(6),
+        longitude: parseFloat(windowStateMatch[2]).toFixed(6),
+        finalUrl
+      });
+    }
+
+    return res.status(422).json({
+      success: false,
+      message: 'Could not extract exact coordinates from this link. You can also right-click on Google Maps and copy coordinates directly (e.g. 25.7532, 71.3965).'
+    });
+  } catch (error) {
+    console.error('Error resolving Google Maps URL:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to resolve Google Maps link. Please try copying coordinates directly from Google Maps.'
+    });
+  }
+};
+
+
