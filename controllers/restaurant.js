@@ -1105,6 +1105,21 @@ exports.verifyTableSession = async (req, res) => {
     }
 
     // Return verified data
+    // Fetch restaurant map coordinates for geofencing if configured
+    let restaurantLocation = null;
+    try {
+      const WebsiteSection = require('../models/WebsiteSection');
+      const mapSec = await WebsiteSection.findOne({ restaurantId: restaurant._id, sectionId: 'map' });
+      if (mapSec?.content?.location?.latitude && mapSec?.content?.location?.longitude) {
+        restaurantLocation = {
+          latitude: parseFloat(mapSec.content.location.latitude),
+          longitude: parseFloat(mapSec.content.location.longitude)
+        };
+      }
+    } catch (locErr) {
+      // Ignore location fetch error
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -1116,6 +1131,7 @@ exports.verifyTableSession = async (req, res) => {
           subdomain: restaurant.website?.subdomain,
           status: restaurant.status,
           currency: '₹',
+          location: restaurantLocation,
           socialLinks: restaurant.socialLinks || {},
           googleReviewLink: restaurant.googleReviewLink || '',
           portalSettings: restaurant.portalSettings || {},

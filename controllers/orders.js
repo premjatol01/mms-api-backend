@@ -8,6 +8,21 @@ const { emitToRestaurant, emitToTable } = require('../socket');
 const { sendNotification } = require('../utils/notificationHelper');
 
 /**
+ * Computes surface distance in meters between two lat/lng coordinates (Haversine formula).
+ */
+function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Earth radius in meters
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
  * Finds or creates a customer record for a restaurant and updates visit/spend activity
  */
 async function upsertCustomerForRestaurant({ restaurantId, mobile, name = '', sessionId = null, spend = 0 }) {
@@ -395,6 +410,43 @@ exports.placePublicOrder = async (req, res) => {
         success: false,
         message: 'This restaurant is currently not accepting new orders.'
       });
+    }
+
+    // Geofencing verification (prevent ordering outside restaurant premises)
+    const geofence = restaurant.portalSettings?.operations?.geofencing;
+    if (geofence && geofence.enabled) {
+      try {
+        const WebsiteSection = require('../models/WebsiteSection');
+        const mapSec = await WebsiteSection.findOne({ restaurantId: restaurant._id, sectionId: 'map' });
+        const restLat = parseFloat(mapSec?.content?.location?.latitude);
+        const restLng = parseFloat(mapSec?.content?.location?.longitude);
+
+        if (!isNaN(restLat) && !isNaN(restLng) && restLat !== 0 && restLng !== 0) {
+          const custLat = parseFloat(req.body.customerLatitude ?? req.body.latitude);
+          const custLng = parseFloat(req.body.customerLongitude ?? req.body.longitude);
+
+          if (isNaN(custLat) || isNaN(custLng)) {
+            return res.status(403).json({
+              success: false,
+              errorType: 'LOCATION_REQUIRED',
+              message: 'Please allow device location access to verify you are at the restaurant dining table.'
+            });
+          }
+
+          const distanceMeters = calculateHaversineDistance(custLat, custLng, restLat, restLng);
+          const allowedRadius = (Number(geofence.radiusMeters) || 100) + 25; // 25m grace margin for indoor GPS drift
+
+          if (distanceMeters > allowedRadius) {
+            return res.status(403).json({
+              success: false,
+              errorType: 'OUT_OF_RANGE',
+              message: `You are outside ${restaurant.name}'s dining area (${Math.round(distanceMeters)}m away). Dine-in orders can only be placed on-site.`
+            });
+          }
+        }
+      } catch (geoErr) {
+        console.warn('Geofence check warning:', geoErr.message);
+      }
     }
 
     // 1. Find or create an active Session for this table
@@ -1421,14 +1473,31 @@ exports.markSessionPaid = async (req, res) => {
     }
 
     // Broadcast session:completed to both restaurant admin and customer table
+    let redirectTarget = 'website';
+    let redirectUrl = '';
+    try {
+      const restDoc = await Restaurant.findById(session.restaurantId).select('googleReviewLink portalSettings');
+      const redirectConfig = restDoc?.portalSettings?.operations?.sessionEndRedirect || {};
+      redirectTarget = redirectConfig.target || 'website';
+      if (redirectTarget === 'google_review') {
+        redirectUrl = restDoc?.googleReviewLink || redirectConfig.googleReviewUrl || '';
+      }
+    } catch (e) {
+      // ignore
+    }
+
     emitToRestaurant(session.restaurantId, 'session:completed', {
       session,
-      tableId: session.tableId
+      tableId: session.tableId,
+      redirectTarget,
+      redirectUrl
     });
 
     emitToTable(session.tableId, 'session:completed', {
       session,
-      tableId: session.tableId
+      tableId: session.tableId,
+      redirectTarget,
+      redirectUrl
     });
 
     return res.status(200).json({
@@ -1495,14 +1564,31 @@ exports.endSessionDirectly = async (req, res) => {
     }
     await updatedSession.save();
 
+    let redirectTarget = 'website';
+    let redirectUrl = '';
+    try {
+      const restDoc = await Restaurant.findById(updatedSession.restaurantId).select('googleReviewLink portalSettings');
+      const redirectConfig = restDoc?.portalSettings?.operations?.sessionEndRedirect || {};
+      redirectTarget = redirectConfig.target || 'website';
+      if (redirectTarget === 'google_review') {
+        redirectUrl = restDoc?.googleReviewLink || redirectConfig.googleReviewUrl || '';
+      }
+    } catch (e) {
+      // ignore
+    }
+
     emitToRestaurant(updatedSession.restaurantId, 'session:completed', {
       session: updatedSession,
-      tableId: updatedSession.tableId
+      tableId: updatedSession.tableId,
+      redirectTarget,
+      redirectUrl
     });
 
     emitToTable(updatedSession.tableId, 'session:completed', {
       session: updatedSession,
-      tableId: updatedSession.tableId
+      tableId: updatedSession.tableId,
+      redirectTarget,
+      redirectUrl
     });
 
     return res.status(200).json({

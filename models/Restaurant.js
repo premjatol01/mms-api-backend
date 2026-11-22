@@ -151,7 +151,15 @@ const restaurantSchema = new mongoose.Schema({
       isActive: { type: Boolean, default: true },
       enableCart: { type: Boolean, default: true },
       enableFloatingCart: { type: Boolean, default: true },
-      enableGames: { type: Boolean, default: true }
+      enableGames: { type: Boolean, default: true },
+      geofencing: {
+        enabled: { type: Boolean, default: false },
+        radiusMeters: { type: Number, default: 100 }
+      },
+      sessionEndRedirect: {
+        target: { type: String, enum: ['website', 'google_review'], default: 'website' },
+        googleReviewUrl: { type: String, default: '' }
+      }
     },
     tableGames: {
       enabled: { type: Boolean, default: true },
