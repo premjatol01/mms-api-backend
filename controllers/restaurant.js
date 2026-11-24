@@ -1120,6 +1120,33 @@ exports.verifyTableSession = async (req, res) => {
       // Ignore location fetch error
     }
 
+    // Check if customer has an active session with orders on another table
+    let otherActiveTable = null;
+    if (req.query.customerMobile) {
+      const qMobile = String(req.query.customerMobile).replace(/\D/g, '').slice(-10);
+      if (qMobile.length === 10) {
+        try {
+          const otherSession = await Session.findOne({
+            restaurantId: restaurant._id,
+            tableId: { $ne: table._id },
+            customerMobile: qMobile,
+            status: 'active'
+          });
+          if (otherSession && Array.isArray(otherSession.orderIds) && otherSession.orderIds.length > 0) {
+            const oTable = await Table.findById(otherSession.tableId);
+            otherActiveTable = {
+              sessionId: otherSession._id,
+              tableId: otherSession.tableId,
+              tableName: oTable?.tableNo || oTable?.tableName || 'Previous Table',
+              orderCount: otherSession.orderIds.length
+            };
+          }
+        } catch (oErr) {
+          console.warn('Error checking other table session:', oErr?.message);
+        }
+      }
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -1166,7 +1193,8 @@ exports.verifyTableSession = async (req, res) => {
           favorites: activeSession.favorites || [],
           startedAt: activeSession.startedAt
         } : null,
-        orders: sessionOrders
+        orders: sessionOrders,
+        otherActiveTable
       }
     });
   } catch (error) {

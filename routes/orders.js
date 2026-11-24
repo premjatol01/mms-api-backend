@@ -13,6 +13,7 @@ const {
   updateOrderStatus,
   updateItemStatus,
   cancelOrderItems,
+  changePublicTableSession,
   serveAllInSession,
   markSessionPaid,
   endSessionDirectly
@@ -21,6 +22,7 @@ const {
 // ─── Public routes (Customer QR Order Portal) ──────────────────────────────
 router.get('/public/session/:subdomain/:tableId', getPublicTableSession);
 router.post('/public/place-order', placePublicOrder);
+router.post('/public/change-table', changePublicTableSession);
 router.post('/public/session/sync-customer', syncCustomerToSession);
 router.post('/public/session/favorite', toggleSessionFavorite);
 router.post('/public/request-waiter', requestWaiter);

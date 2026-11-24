@@ -449,14 +449,23 @@ exports.placePublicOrder = async (req, res) => {
       }
     }
 
-    // 1. Find or create an active Session for this table
+    // 1. Mandatory 10-digit mobile number verification
+    const cleanMobile = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : (session?.customerMobile || null);
+    if (!cleanMobile || cleanMobile.length !== 10) {
+      return res.status(400).json({
+        success: false,
+        errorType: 'MOBILE_REQUIRED',
+        message: 'A valid 10-digit mobile number is mandatory to place your order.'
+      });
+    }
+
+    // 2. Find or create an active Session for this table
     let session = await Session.findOne({
       restaurantId: restaurant._id,
       tableId: table._id,
       status: 'active'
     });
 
-    const cleanMobile = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : (session?.customerMobile || null);
     let customer = null;
 
     if (!session) {
@@ -467,7 +476,7 @@ exports.placePublicOrder = async (req, res) => {
         sessionNumber,
         status: 'active',
         paymentStatus: 'pending',
-        customerMobile: cleanMobile || null,
+        customerMobile: cleanMobile,
         orderIds: [],
         total: 0,
         subtotal: 0,
@@ -476,27 +485,25 @@ exports.placePublicOrder = async (req, res) => {
         startedAt: new Date()
       });
       await session.save();
-    } else if (cleanMobile && !session.customerMobile) {
+    } else if (!session.customerMobile || session.customerMobile !== cleanMobile) {
       session.customerMobile = cleanMobile;
       await session.save();
     }
 
-    if (cleanMobile && cleanMobile.length === 10) {
-      customer = await upsertCustomerForRestaurant({
-        restaurantId: restaurant._id,
-        mobile: cleanMobile,
-        sessionId: session._id,
-        spend: 0
-      });
-      if (customer && !session.customerId) {
-        session.customerId = customer._id;
-        await session.save();
-      }
-      if (customer) {
-        await syncSessionAndCustomerFavorites(session, customer);
-        customer.lastOrderAt = new Date();
-        await customer.save().catch(() => {});
-      }
+    customer = await upsertCustomerForRestaurant({
+      restaurantId: restaurant._id,
+      mobile: cleanMobile,
+      sessionId: session._id,
+      spend: 0
+    });
+    if (customer && !session.customerId) {
+      session.customerId = customer._id;
+      await session.save();
+    }
+    if (customer) {
+      await syncSessionAndCustomerFavorites(session, customer);
+      customer.lastOrderAt = new Date();
+      await customer.save().catch(() => {});
     }
 
     // 2. Prepare order items
@@ -593,6 +600,197 @@ exports.placePublicOrder = async (req, res) => {
     });
   } catch (error) {
     console.error('Error placing public order:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @route   POST /api/orders/public/change-table
+// @desc    Transfer customer's active table session and orders to a new table
+// @access  Public
+exports.changePublicTableSession = async (req, res) => {
+  try {
+    const { subdomain, fromTableId, toTableId, mobile } = req.body;
+
+    if (!subdomain || !toTableId) {
+      return res.status(400).json({ success: false, message: 'Subdomain and target table are required.' });
+    }
+
+    const cleanMobile = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : null;
+    if (!cleanMobile || cleanMobile.length !== 10) {
+      return res.status(400).json({
+        success: false,
+        errorType: 'MOBILE_REQUIRED',
+        message: 'A valid 10-digit mobile number is required to shift tables.'
+      });
+    }
+
+    // Resolve target table and restaurant
+    const resolvedTo = await resolveRestaurantAndTable(subdomain, toTableId);
+    if (resolvedTo.error) {
+      return res.status(404).json({ success: false, message: resolvedTo.error });
+    }
+    const { restaurant, table: toTable } = resolvedTo;
+
+    // Find active session for this customer at this restaurant
+    let session = null;
+    if (fromTableId) {
+      const resolvedFrom = await resolveRestaurantAndTable(subdomain, fromTableId);
+      if (!resolvedFrom.error && resolvedFrom.table) {
+        session = await Session.findOne({
+          restaurantId: restaurant._id,
+          tableId: resolvedFrom.table._id,
+          status: 'active',
+          $or: [
+            { customerMobile: cleanMobile },
+            { customerMobile: { $exists: false } },
+            { customerMobile: null }
+          ]
+        });
+      }
+    }
+
+    if (!session) {
+      // Find any active session of this customer at this restaurant
+      session = await Session.findOne({
+        restaurantId: restaurant._id,
+        customerMobile: cleanMobile,
+        status: 'active'
+      });
+    }
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active dining session found for this mobile number to move.'
+      });
+    }
+
+    // Check if session is already on target table
+    if (String(session.tableId) === String(toTable._id)) {
+      const currentOrders = await Order.find({ sessionId: session._id }).sort({ createdAt: 1 });
+      return res.status(200).json({
+        success: true,
+        message: `Already on Table ${toTable.tableNo || toTable.tableName || ''}`,
+        data: {
+          session,
+          orders: currentOrders,
+          table: {
+            _id: toTable._id,
+            id: toTable._id,
+            tableNo: toTable.tableNo || toTable.tableId,
+            tableName: toTable.tableName || toTable.tableNo || toTable.tableId
+          }
+        }
+      });
+    }
+
+    // Check target table occupancy
+    const existingToSession = await Session.findOne({
+      restaurantId: restaurant._id,
+      tableId: toTable._id,
+      status: 'active'
+    });
+
+    if (existingToSession && String(existingToSession._id) !== String(session._id)) {
+      const existingOrders = await Order.find({ sessionId: existingToSession._id, status: { $ne: 'cancelled' } });
+      const existingCleanMobile = existingToSession.customerMobile
+        ? String(existingToSession.customerMobile).replace(/\D/g, '').slice(-10)
+        : null;
+
+      if (existingOrders.length > 0 && existingCleanMobile && existingCleanMobile !== cleanMobile) {
+        return res.status(400).json({
+          success: false,
+          errorType: 'TABLE_OCCUPIED',
+          message: `Table ${toTable.tableNo || toTable.tableId} is currently occupied by another customer. Please choose an available table or ask staff.`
+        });
+      }
+
+      // If target table has an empty session without orders, remove it
+      if (existingOrders.length === 0) {
+        await Session.deleteOne({ _id: existingToSession._id });
+      }
+    }
+
+    const fromTable = await Table.findById(session.tableId);
+    const fromTableName = fromTable?.tableNo || fromTable?.tableName || 'Previous Table';
+    const toTableName = toTable.tableNo || toTable.tableName || 'New Table';
+
+    // Transfer session to new table
+    session.tableId = toTable._id;
+    if (!session.customerMobile) {
+      session.customerMobile = cleanMobile;
+    }
+    await session.save();
+
+    // Transfer all orders of this session to new table
+    await Order.updateMany(
+      { sessionId: session._id },
+      { $set: { tableId: toTable._id } }
+    );
+
+    await recalcSessionDoc(session._id);
+    const updatedSession = await Session.findById(session._id);
+    const allSessionOrders = await Order.find({ sessionId: session._id }).sort({ createdAt: 1 });
+
+    // Real-time broadcasts
+    emitToRestaurant(restaurant._id, 'session:updated', {
+      session: updatedSession,
+      orders: allSessionOrders,
+      table: {
+        _id: toTable._id,
+        id: toTable._id,
+        tableNo: toTable.tableNo || toTable.tableId
+      }
+    });
+
+    emitToRestaurant(restaurant._id, 'order:updated', {
+      session: updatedSession,
+      orders: allSessionOrders,
+      table: {
+        _id: toTable._id,
+        id: toTable._id,
+        tableNo: toTable.tableNo || toTable.tableId
+      }
+    });
+
+    if (fromTable) {
+      emitToTable(fromTable._id, 'table:shifted', {
+        toTableId: toTable._id,
+        toTableName
+      });
+    }
+
+    emitToTable(toTable._id, 'session:updated', {
+      session: updatedSession,
+      orders: allSessionOrders
+    });
+
+    sendNotification({
+      recipientType: 'restaurant',
+      restaurantId: restaurant._id,
+      category: 'order',
+      title: `Table Shift: ${fromTableName} ➔ ${toTableName}`,
+      message: `Customer (${cleanMobile}) shifted to ${toTableName}. ${allSessionOrders.length} order(s) transferred.`,
+      actionUrl: '/orders',
+      metadata: { sessionId: session._id, fromTableId: fromTable?._id, toTableId: toTable._id }
+    }).catch((err) => console.error('Notification error:', err?.message));
+
+    return res.status(200).json({
+      success: true,
+      message: `Table moved to ${toTableName}! Your orders have been shifted.`,
+      data: {
+        session: updatedSession,
+        orders: allSessionOrders,
+        table: {
+          _id: toTable._id,
+          id: toTable._id,
+          tableNo: toTable.tableNo || toTable.tableId,
+          tableName: toTable.tableName || toTable.tableNo || toTable.tableId
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error shifting table session:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -739,6 +937,28 @@ exports.syncCustomerToSession = async (req, res) => {
       appliedOffer: session.appliedOffer || null
     });
 
+    // Check if customer has an active session with orders on another table at this restaurant
+    let otherActiveTable = null;
+    try {
+      const otherSession = await Session.findOne({
+        restaurantId: restaurant._id,
+        tableId: { $ne: session.tableId },
+        customerMobile: cleanMobile,
+        status: 'active'
+      });
+      if (otherSession && Array.isArray(otherSession.orderIds) && otherSession.orderIds.length > 0) {
+        const oTable = await Table.findById(otherSession.tableId);
+        otherActiveTable = {
+          sessionId: otherSession._id,
+          tableId: otherSession.tableId,
+          tableName: oTable?.tableNo || oTable?.tableName || 'Previous Table',
+          orderCount: otherSession.orderIds.length
+        };
+      }
+    } catch (checkErr) {
+      console.warn('Error checking other active session:', checkErr?.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Mobile number synced with active session successfully',
@@ -750,6 +970,7 @@ exports.syncCustomerToSession = async (req, res) => {
         appliedOffer: session.appliedOffer || null,
         discount: session.discount || 0,
         favorites: session.favorites || [],
+        otherActiveTable,
         customer: customer
           ? {
               id: customer._id,
