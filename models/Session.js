@@ -10,6 +10,9 @@ const sessionSchema = new mongoose.Schema({
     enum: ['pending', 'successful', 'not_required'],
     default: 'pending'
   },
+  billRequested: { type: Boolean, default: false },
+  billedAt: { type: Date, default: null },
+  guestCount: { type: Number, default: 2 },
   paymentMethod: {
     type: String,
     enum: ['cash', 'upi', 'card', 'online', 'other'],

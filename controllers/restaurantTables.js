@@ -269,7 +269,7 @@ exports.createTable = async (req, res) => {
     }
 
     // Single table creation (from Tables & QR module)
-    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId } = req.body;
+    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId, capacity, section, shape } = req.body;
     const rawLabel = (inputTableNo || inputTableId || '').trim();
     const cleanNum = rawLabel.replace(/^table\s*/i, '').trim();
     const userLabel = cleanNum || rawLabel;
@@ -304,6 +304,9 @@ exports.createTable = async (req, res) => {
       tableId: userLabel,
       tableNo: userLabel,
       number: tableNum,
+      capacity: Number(capacity) || 4,
+      section: section ? String(section).trim() : 'Main Hall',
+      shape: shape || 'square',
       status: status || 'active',
       qrCodeId: qrCodeId || undefined
     });
@@ -324,7 +327,7 @@ exports.createTable = async (req, res) => {
 
 exports.updateTable = async (req, res) => {
   try {
-    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId, templateId } = req.body;
+    const { tableId: inputTableId, tableNo: inputTableNo, status, qrCodeId, templateId, capacity, section, shape } = req.body;
 
     const table = await Table.findById(req.params.id);
     if (!table) return res.status(404).json({ success: false, message: 'Table not found' });
@@ -375,6 +378,9 @@ exports.updateTable = async (req, res) => {
       payload.tableId = userLabel;
     }
     if (status) payload.status = status;
+    if (capacity !== undefined) payload.capacity = Number(capacity) || 4;
+    if (section !== undefined) payload.section = String(section).trim() || 'Main Hall';
+    if (shape !== undefined) payload.shape = shape || 'square';
     if (qrCodeId !== undefined) payload.qrCodeId = qrCodeId || null;
 
     // Handle templateId update for table's QR code

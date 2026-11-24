@@ -16,7 +16,8 @@ const {
   changePublicTableSession,
   serveAllInSession,
   markSessionPaid,
-  endSessionDirectly
+  endSessionDirectly,
+  requestBillSession
 } = require('../controllers/orders');
 
 // ─── Public routes (Customer QR Order Portal) ──────────────────────────────
@@ -37,6 +38,7 @@ router.put('/:id/status', updateOrderStatus);
 router.put('/:id/items/:itemId/status', updateItemStatus);
 router.post('/:id/cancel', cancelOrderItems);
 router.post('/sessions/:sessionId/serve-all', serveAllInSession);
+router.post('/sessions/:sessionId/bill', requestBillSession);
 router.post('/sessions/:sessionId/pay', markSessionPaid);
 router.post('/sessions/:sessionId/end', endSessionDirectly);
 

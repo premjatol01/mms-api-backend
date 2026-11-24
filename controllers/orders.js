@@ -1870,3 +1870,44 @@ exports.requestWaiter = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to notify waiter. Please try again.' });
   }
 };
+
+// @route   POST /api/orders/sessions/:sessionId/bill
+// @desc    Mark bill as requested / generated for a table session (moves table to Billed state)
+// @access  Protected
+exports.requestBillSession = async (req, res) => {
+  try {
+    const session = await Session.findOne({
+      _id: req.params.sessionId,
+      restaurantId: req.user.restaurantId
+    });
+    if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
+    if (session.status === 'completed') {
+      return res.status(400).json({ success: false, message: 'Session is already completed' });
+    }
+
+    session.billRequested = true;
+    session.billedAt = new Date();
+    await session.save();
+
+    const allSessionOrders = await Order.find({ sessionId: session._id }).sort({ createdAt: 1 });
+
+    emitToRestaurant(session.restaurantId, 'session:updated', {
+      session,
+      orders: allSessionOrders
+    });
+
+    emitToTable(session.tableId, 'session:updated', {
+      session,
+      orders: allSessionOrders
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Bill requested successfully',
+      data: session
+    });
+  } catch (error) {
+    console.error('Error requesting bill for session:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
