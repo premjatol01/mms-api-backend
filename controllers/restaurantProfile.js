@@ -116,6 +116,10 @@ const formatProfile = (restaurant, req, tableCount = 0) => {
       chargeType: r.gstSettings?.chargeType || 'exclusive',
     },
 
+    floorSections: Array.isArray(r.floorSections) && r.floorSections.length > 0
+      ? r.floorSections
+      : ['Main Hall', 'AC Dining', 'Balcony', 'Outdoor', 'Rooftop', 'Lounge'],
+
     // Read-only subscription info (for the Subscription tab & profile module)
     subscription: {
       ...(r.subscription || {}),

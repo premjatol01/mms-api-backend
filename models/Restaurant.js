@@ -57,6 +57,10 @@ const restaurantSchema = new mongoose.Schema({
   cuisineTypes: [String],
   establishmentYear: Number,
   coverImage: String,
+  floorSections: {
+    type: [String],
+    default: ['Main Hall', 'AC Dining', 'Balcony', 'Outdoor', 'Rooftop', 'Lounge']
+  },
 
   contact: {
     primaryPhone: String,
