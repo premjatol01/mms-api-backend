@@ -65,6 +65,7 @@ app.use('/api/restaurant/website', require('./routes/website'));
 app.use('/api/restaurant/tables', require('./routes/restaurantTables'));
 app.use('/api/restaurant/subscription', require('./routes/restaurantSubscription'));
 app.use('/api/restaurant/analytics', require('./routes/restaurantAnalytics'));
+app.use('/api/restaurant/staff', require('./routes/staff'));
 app.use('/api/restaurant', restaurantProfileRoutes);
 app.use('/api/menu', require('./routes/menu'));
 app.use('/api/leads', leadRoutes);
