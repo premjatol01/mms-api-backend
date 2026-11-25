@@ -247,25 +247,84 @@ const setupPassword = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please provide token and new password' });
     }
 
-    // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-
-    const user = await User.findById(decoded.id);
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
     }
 
-    // Hash new password
     const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
-    user.status = 'active'; // Activate the account
+    const hashedPassword = await bcrypt.hash(password, salt);
 
+    // 1. Check if token belongs to an invited Staff member
+    const Staff = require('../models/Staff');
+    const staffMember = await Staff.findOne({
+      activationToken: token,
+      tokenExpiresAt: { $gte: new Date() },
+    });
+
+    if (staffMember) {
+      staffMember.status = 'active';
+      staffMember.activatedAt = new Date();
+      staffMember.activationToken = null;
+      staffMember.tokenExpiresAt = null;
+      await staffMember.save();
+
+      // Find or create associated User account for staff member
+      let user = await User.findOne({ email: staffMember.email.toLowerCase() });
+      if (!user) {
+        user = new User({
+          name: staffMember.name,
+          email: staffMember.email.toLowerCase(),
+          phone: staffMember.phone || '',
+          password: hashedPassword,
+          role: 'restaurant_admin',
+          restaurantId: staffMember.restaurantId,
+          status: 'active',
+        });
+      } else {
+        user.password = hashedPassword;
+        user.status = 'active';
+        user.restaurantId = staffMember.restaurantId;
+      }
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Account activated and password set successfully! You can now login.',
+      });
+    }
+
+    // 2. Otherwise check User with JWT token or resetPasswordToken
+    let user = null;
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+      if (decoded?.id) {
+        user = await User.findById(decoded.id);
+      }
+    } catch (jwtErr) {
+      // not a JWT, check if it's a resetPasswordToken
+      user = await User.findOne({
+        resetPasswordToken: token,
+        resetPasswordExpire: { $gte: Date.now() },
+      });
+    }
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired activation token' });
+    }
+
+    user.password = hashedPassword;
+    user.status = 'active';
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
     await user.save();
 
-    res.status(200).json({ success: true, message: 'Password set successfully. You can now login.' });
+    return res.status(200).json({
+      success: true,
+      message: 'Password set successfully! You can now login.',
+    });
   } catch (error) {
-    res.status(400).json({ success: false, message: 'Invalid or expired token' });
+    console.error('setupPassword error:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to setup password' });
   }
 };
 
