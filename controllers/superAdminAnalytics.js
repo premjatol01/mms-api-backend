@@ -5,9 +5,12 @@ const Lead = require('../models/Lead');
 const Order = require('../models/Order');
 const Table = require('../models/Table');
 const Package = require('../models/Package');
+const Customer = require('../models/Customer');
+const CustomerReview = require('../models/CustomerReview');
+const MenuItem = require('../models/MenuItem');
 
 /**
- * Helper to generate month labels for the last N months
+ * Helper to generate month windows for the last N months
  */
 function getLastNMonths(n = 6) {
   const months = [];
@@ -21,7 +24,7 @@ function getLastNMonths(n = 6) {
       monthIndex: d.getMonth(),
       label: `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`,
       shortLabel: monthNames[d.getMonth()],
-      start: new Date(d.getFullYear(), d.getMonth(), 1),
+      start: new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0),
       end: new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999),
     });
   }
@@ -30,47 +33,48 @@ function getLastNMonths(n = 6) {
 
 /**
  * GET /api/super-admin/analytics
- * Returns comprehensive analytics records, revenue stats, trends, and recent records.
+ * Aggregates 100% REAL data from MongoDB collections across the entire Tablly platform.
  */
 exports.getSuperAdminAnalytics = async (req, res) => {
   try {
     const now = new Date();
     const months = getLastNMonths(6);
 
-    // 1. Parallel aggregations for core records
+    // 1. Parallel database queries across all relevant collections
     const [
       allRestaurants,
       allSubscriptions,
       allRenewalRequests,
       allLeads,
-      totalOrdersCount,
-      orderGmvResult,
-      totalTablesCount,
       allPackages,
+      allOrders,
+      totalTablesCount,
+      totalDishesCount,
+      totalCustomersCount,
+      allReviews,
+      allTables,
     ] = await Promise.all([
-      Restaurant.find({}).select('name status subscription createdAt contact address').lean(),
+      Restaurant.find({}).lean(),
       Subscription.find({}).lean(),
       RenewalRequest.find({}).sort({ createdAt: -1 }).lean(),
       Lead.find({}).sort({ createdAt: -1 }).lean(),
-      Order.countDocuments({ status: { $ne: 'cancelled' } }),
-      Order.aggregate([
-        { $match: { status: { $ne: 'cancelled' } } },
-        { $group: { _id: null, totalGmv: { $sum: '$total' } } },
-      ]),
+      Package.find({}).lean(),
+      Order.find({}).select('restaurantId orderNumber status total source createdAt items customer').lean(),
       Table.countDocuments(),
-      Package.find({}).select('name price').lean(),
+      MenuItem.countDocuments(),
+      Customer.countDocuments(),
+      CustomerReview.find({}).select('rating status createdAt restaurantId').lean(),
+      Table.find({}).select('restaurantId status capacity').lean(),
     ]);
 
-    const totalGmv = orderGmvResult[0]?.totalGmv || 0;
-
-    // 2. Restaurant status counts
+    // 2. Restaurant status & subscription breakdown
     let activeRestroCount = 0;
     let trialRestroCount = 0;
     let inactiveRestroCount = 0;
 
     allRestaurants.forEach((r) => {
-      const pkgName = r.subscription?.packageName || '';
-      const isTrial = pkgName.toLowerCase().includes('trial');
+      const pkgName = (r.subscription?.packageName || '').toLowerCase();
+      const isTrial = pkgName.includes('trial') || (Number(r.subscription?.price) === 0 && r.subscription?.packageId);
       if (r.status === 'inactive') {
         inactiveRestroCount++;
       } else if (isTrial) {
@@ -80,14 +84,13 @@ exports.getSuperAdminAnalytics = async (req, res) => {
       }
     });
 
-    // 3. Revenue calculations
-    // Sum of all confirmed renewal requests + active paid subscriptions
-    let confirmedRevenue = 0;
+    // 3. Platform Subscription Revenue & MRR calculations (100% Real)
+    let confirmedRenewalRevenue = 0;
     let pendingVerificationCount = 0;
 
     allRenewalRequests.forEach((req) => {
       if (['confirmed', 'approved'].includes(req.status)) {
-        confirmedRevenue += Number(req.amount) || 0;
+        confirmedRenewalRevenue += Number(req.amount) || 0;
       }
       if (req.status === 'pending') {
         pendingVerificationCount++;
@@ -96,48 +99,81 @@ exports.getSuperAdminAnalytics = async (req, res) => {
 
     // Calculate MRR from active non-trial subscriptions
     let mrr = 0;
+    let activePaidSubscriptionsRevenue = 0;
     allSubscriptions.forEach((sub) => {
-      if (sub.status === 'active' && sub.price > 0) {
+      if (sub.status === 'active' && Number(sub.price) > 0) {
         const durationDays = Number(sub.duration) || 30;
         const monthlyFactor = 30 / Math.max(durationDays, 30);
-        mrr += Math.round(sub.price * monthlyFactor);
+        mrr += Math.round(Number(sub.price) * monthlyFactor);
+        activePaidSubscriptionsRevenue += Number(sub.price);
       }
     });
 
-    // Baseline fallbacks if early in production so UI displays inspiring metrics
-    const effectiveTotalRevenue = confirmedRevenue > 0 ? confirmedRevenue : Math.max(mrr * 3, 18500);
-    const effectiveMrr = mrr > 0 ? mrr : 14999;
+    // Total subscription revenue: sum of confirmed renewal requests + active paid subscriptions (deduplicating if any)
+    const totalPlatformRevenue = confirmedRenewalRevenue > 0
+      ? confirmedRenewalRevenue
+      : activePaidSubscriptionsRevenue;
 
-    // 4. Lead statistics
+    // 4. Platform Diner Orders & Gross Merchandise Value (GMV)
+    const validOrders = allOrders.filter((o) => o.status !== 'cancelled');
+    const totalOrdersCount = validOrders.length;
+    const totalAllOrdersCount = allOrders.length;
+    const totalGmv = validOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+    const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalGmv / totalOrdersCount) : 0;
+
+    // Today's orders
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const todayOrders = validOrders.filter((o) => new Date(o.createdAt) >= startOfToday);
+    const todayGmv = todayOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+
+    // 5. B2B Leads & Conversion Metrics
     const totalLeads = allLeads.length;
     const convertedLeads = allLeads.filter((l) => l.stage === 'converted').length;
     const conversionRate = totalLeads > 0 ? Math.round((convertedLeads / totalLeads) * 100) : 0;
 
-    // 5. Monthly Revenue & Growth Trends (Last 6 Months)
-    const revenueTrends = months.map((m, idx) => {
-      // Find actual renewal requests in this month
+    // 6. Diner Satisfaction & Ratings
+    const totalReviews = allReviews.length;
+    const averageRating = totalReviews > 0
+      ? Number((allReviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / totalReviews).toFixed(1))
+      : 5.0;
+
+    // 7. Monthly Revenue & Orders Trends (Last 6 Months - Real DB Data)
+    const revenueTrends = months.map((m) => {
+      // Confirmed renewals in this month
       const monthConfirmedReqs = allRenewalRequests.filter((r) => {
         const d = new Date(r.createdAt || r.requestedAt);
         return ['confirmed', 'approved'].includes(r.status) && d >= m.start && d <= m.end;
       });
+      const renewalAmount = monthConfirmedReqs.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 
-      const actualRev = monthConfirmedReqs.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      // Subscriptions created/paid in this month
+      const monthSubs = allSubscriptions.filter((s) => {
+        const d = new Date(s.createdAt || s.startDate);
+        return d >= m.start && d <= m.end && Number(s.price) > 0;
+      });
+      const subsAmount = monthSubs.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
 
-      // Graceful curve simulation for visualization if database has only fresh records
-      const simulatedBase = [12500, 18200, 24800, 31500, 42000, 54900];
-      const targetBase = [15000, 22000, 28000, 38000, 48000, 60000];
+      const actualSubscriptionRev = renewalAmount > 0 ? renewalAmount : subsAmount;
+
+      // Real diner orders and GMV in this month
+      const monthOrders = validOrders.filter((o) => {
+        const d = new Date(o.createdAt);
+        return d >= m.start && d <= m.end;
+      });
+      const monthGmv = Math.round(monthOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0));
 
       return {
         month: m.shortLabel,
         fullLabel: m.label,
-        revenue: actualRev > 0 ? actualRev : simulatedBase[idx] || 25000,
-        target: targetBase[idx] || 30000,
-        subscriptions: monthConfirmedReqs.length > 0 ? monthConfirmedReqs.length : idx + 2,
+        revenue: actualSubscriptionRev,
+        gmv: monthGmv,
+        orders: monthOrders.length,
+        subscriptionsCount: monthConfirmedReqs.length + monthSubs.length,
       };
     });
 
-    // 6. Onboarding & Leads Growth Trends
-    const onboardingTrends = months.map((m, idx) => {
+    // 8. Onboarding & Leads Growth Velocity (Last 6 Months - Real DB Data)
+    const onboardingTrends = months.map((m) => {
       const monthRestros = allRestaurants.filter((r) => {
         const d = new Date(r.createdAt);
         return d >= m.start && d <= m.end;
@@ -148,149 +184,223 @@ exports.getSuperAdminAnalytics = async (req, res) => {
         return d >= m.start && d <= m.end;
       });
 
-      const simulatedRestros = [2, 3, 5, 4, 7, 8];
-      const simulatedLeads = [6, 9, 14, 12, 19, 23];
+      const monthConverted = allLeads.filter((l) => {
+        const d = new Date(l.updatedAt || l.createdAt);
+        return l.stage === 'converted' && d >= m.start && d <= m.end;
+      });
 
       return {
         month: m.shortLabel,
-        restaurants: monthRestros.length > 0 ? monthRestros.length : simulatedRestros[idx],
-        leads: monthLeads.length > 0 ? monthLeads.length : simulatedLeads[idx],
+        fullLabel: m.label,
+        restaurants: monthRestros.length,
+        leads: monthLeads.length,
+        converted: monthConverted.length,
       };
     });
 
-    // 7. Package Distribution Breakdown (for Pie/Donut Chart)
-    const packageCountMap = {
-      '1 Month Free Trial': 0,
-      'Starter Plan': 0,
-      'Growth Plan': 0,
-      'Enterprise Plan': 0,
-    };
+    // 9. Dynamic Package Distribution (Matches real Package models + Subscriptions)
+    const palette = ['#8b5cf6', '#10b981', '#38bdf8', '#f59e0b', '#ec4899', '#6366f1'];
+    const packageDistribution = allPackages.map((pkg, idx) => {
+      // Count active subscriptions for this package
+      const activeCount = allSubscriptions.filter((s) => {
+        return (
+          s.status === 'active' &&
+          (String(s.packageId) === String(pkg._id) ||
+            (s.packageName && s.packageName.toLowerCase() === pkg.name.toLowerCase()))
+        );
+      }).length;
 
-    allSubscriptions.forEach((sub) => {
-      const name = sub.packageName || 'Growth Plan';
-      if (/trial/i.test(name)) packageCountMap['1 Month Free Trial']++;
-      else if (/starter|basic/i.test(name)) packageCountMap['Starter Plan']++;
-      else if (/enterprise/i.test(name)) packageCountMap['Enterprise Plan']++;
-      else packageCountMap['Growth Plan']++;
+      // Also count from restaurant profiles if not in Subscription model
+      const restroMatchCount = allRestaurants.filter((r) => {
+        return (
+          r.status === 'active' &&
+          (String(r.subscription?.packageId) === String(pkg._id) ||
+            (r.subscription?.packageName && r.subscription.packageName.toLowerCase() === pkg.name.toLowerCase()))
+        );
+      }).length;
+
+      const totalCount = Math.max(activeCount, restroMatchCount);
+
+      return {
+        _id: pkg._id,
+        name: pkg.name,
+        price: pkg.price || (pkg.pricing && pkg.pricing[0]?.price) || 0,
+        count: totalCount,
+        color: palette[idx % palette.length],
+      };
     });
 
-    // Baseline fallbacks if early in setup
-    if (Object.values(packageCountMap).reduce((a, b) => a + b, 0) === 0) {
-      packageCountMap['1 Month Free Trial'] = 4;
-      packageCountMap['Starter Plan'] = 3;
-      packageCountMap['Growth Plan'] = 6;
-      packageCountMap['Enterprise Plan'] = 2;
-    }
-
-    const packageDistribution = [
-      { name: 'Free Trial', count: packageCountMap['1 Month Free Trial'], color: '#38bdf8' },
-      { name: 'Starter', count: packageCountMap['Starter Plan'], color: '#10b981' },
-      { name: 'Growth', count: packageCountMap['Growth Plan'], color: '#8b5cf6' },
-      { name: 'Enterprise', count: packageCountMap['Enterprise Plan'], color: '#f59e0b' },
-    ];
-
-    // 8. Lead Pipeline Funnel
+    // 10. Real Lead Pipeline Funnel
     const stageCounts = {
       prospect: 0,
+      new_lead: 0,
       contacted: 0,
-      demo_scheduled: 0,
-      proposal_sent: 0,
+      qualified: 0,
+      interested: 0,
+      follow_up: 0,
       converted: 0,
+      lost: 0,
     };
 
     allLeads.forEach((l) => {
       const stage = (l.stage || 'prospect').toLowerCase();
-      if (stageCounts[stage] !== undefined) stageCounts[stage]++;
-      else stageCounts.prospect++;
+      if (stageCounts[stage] !== undefined) {
+        stageCounts[stage]++;
+      } else {
+        stageCounts.prospect++;
+      }
     });
 
-    if (totalLeads === 0) {
-      stageCounts.prospect = 12;
-      stageCounts.contacted = 8;
-      stageCounts.demo_scheduled = 5;
-      stageCounts.proposal_sent = 3;
-      stageCounts.converted = 2;
-    }
-
     const leadsFunnel = [
-      { stage: 'Prospects', count: stageCounts.prospect, fill: '#64748b' },
+      { stage: 'Prospects', count: stageCounts.prospect + stageCounts.new_lead, fill: '#64748b' },
       { stage: 'Contacted', count: stageCounts.contacted, fill: '#3b82f6' },
-      { stage: 'Demo Scheduled', count: stageCounts.demo_scheduled, fill: '#8b5cf6' },
-      { stage: 'Proposal Sent', count: stageCounts.proposal_sent, fill: '#f59e0b' },
+      { stage: 'Qualified', count: stageCounts.qualified + stageCounts.interested, fill: '#8b5cf6' },
+      { stage: 'Follow Up', count: stageCounts.follow_up, fill: '#f59e0b' },
       { stage: 'Converted', count: stageCounts.converted, fill: '#10b981' },
+      { stage: 'Lost', count: stageCounts.lost, fill: '#ef4444' },
     ];
 
-    // 9. Recent Transactions (Last 5)
-    const recentTransactions = allRenewalRequests.slice(0, 5).map((r) => ({
+    // 11. Top Performing Restaurants (Aggregated with real orders & tables)
+    const restaurantMetricsMap = {};
+    allRestaurants.forEach((r) => {
+      restaurantMetricsMap[String(r._id)] = {
+        _id: r._id,
+        name: r.name,
+        plan: r.subscription?.packageName || 'Free Trial',
+        price: Number(r.subscription?.price) || 0,
+        status: r.status,
+        city: r.address?.city || r.contact?.city || 'India',
+        joinedAt: r.createdAt,
+        totalOrders: 0,
+        totalGmv: 0,
+        tableCount: 0,
+      };
+    });
+
+    // Count tables per restaurant
+    allTables.forEach((t) => {
+      const rid = String(t.restaurantId);
+      if (restaurantMetricsMap[rid]) {
+        restaurantMetricsMap[rid].tableCount++;
+      }
+    });
+
+    // Accumulate orders & GMV per restaurant
+    validOrders.forEach((o) => {
+      const rid = String(o.restaurantId);
+      if (restaurantMetricsMap[rid]) {
+        restaurantMetricsMap[rid].totalOrders++;
+        restaurantMetricsMap[rid].totalGmv += Number(o.total) || 0;
+      }
+    });
+
+    const topRestaurants = Object.values(restaurantMetricsMap)
+      .sort((a, b) => b.totalGmv - a.totalGmv || b.totalOrders - a.totalOrders)
+      .slice(0, 6);
+
+    // 12. Geographic / City Distribution
+    const cityMap = {};
+    allRestaurants.forEach((r) => {
+      const city = r.address?.city || 'Unspecified';
+      cityMap[city] = (cityMap[city] || 0) + 1;
+    });
+    const cityDistribution = Object.entries(cityMap).map(([city, count]) => ({
+      city,
+      count,
+    }));
+
+    // 13. Order Status Breakdown
+    const orderStatusCounts = {
+      pending: 0,
+      processing: 0,
+      served: 0,
+      cancelled: 0,
+    };
+    allOrders.forEach((o) => {
+      const s = o.status || 'pending';
+      if (orderStatusCounts[s] !== undefined) {
+        orderStatusCounts[s]++;
+      }
+    });
+    const orderStatusBreakdown = [
+      { name: 'Served', count: orderStatusCounts.served, color: '#10b981' },
+      { name: 'Preparing', count: orderStatusCounts.processing, color: '#3b82f6' },
+      { name: 'Pending', count: orderStatusCounts.pending, color: '#f59e0b' },
+      { name: 'Cancelled', count: orderStatusCounts.cancelled, color: '#ef4444' },
+    ];
+
+    // 14. Actionable Lists: Recent Transactions, Leads & Expiring Subscriptions
+    const recentTransactions = allRenewalRequests.slice(0, 6).map((r) => ({
       _id: r._id,
       restaurantName: r.restaurantName || 'Restaurant',
       planName: r.planName,
-      amount: r.amount,
+      amount: Number(r.amount) || 0,
       status: r.status,
       date: r.createdAt || r.requestedAt,
       requestType: r.requestType,
       transactionRef: r.transactionRef,
     }));
 
-    // 10. Recent Prospective Leads (Last 5)
-    const recentLeads = allLeads.slice(0, 5).map((l) => ({
+    const recentLeads = allLeads.slice(0, 6).map((l) => ({
       _id: l._id,
       restaurantName: l.restaurantName,
       contactPerson: l.contactPerson,
       phone: l.phone,
+      email: l.email,
       stage: l.stage,
       city: l.address?.city || 'India',
       createdAt: l.createdAt,
     }));
 
-    // 11. Subscriptions Expiring Soon (Next 14 Days)
-    const next14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const next30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const expiringSoon = allSubscriptions
       .filter((s) => {
         const end = new Date(s.endDate);
-        return s.status === 'active' && end >= now && end <= next14Days;
+        return s.status === 'active' && end >= now && end <= next30Days;
       })
-      .slice(0, 5)
+      .sort((a, b) => new Date(a.endDate) - new Date(b.endDate))
+      .slice(0, 6)
       .map((s) => ({
         _id: s._id,
         restaurantName: s.restaurantName || 'Restaurant',
         packageName: s.packageName,
+        price: Number(s.price) || 0,
         endDate: s.endDate,
         daysLeft: Math.ceil((new Date(s.endDate) - now) / (1000 * 60 * 60 * 24)),
       }));
-
-    // 12. Top Performing Restaurants
-    const topRestaurants = allRestaurants.slice(0, 5).map((r) => ({
-      _id: r._id,
-      name: r.name,
-      plan: r.subscription?.packageName || '1 Month Free Trial',
-      status: r.status,
-      city: r.address?.city || r.contact?.city || 'India',
-      joinedAt: r.createdAt,
-    }));
 
     return res.status(200).json({
       success: true,
       data: {
         kpi: {
-          totalRevenue: effectiveTotalRevenue,
-          mrr: effectiveMrr,
-          totalRestaurants: allRestaurants.length || 8,
-          activeRestaurants: activeRestroCount || 5,
-          trialRestaurants: trialRestroCount || 2,
-          inactiveRestaurants: inactiveRestroCount || 1,
-          totalLeads: totalLeads || 28,
-          convertedLeads: convertedLeads || 6,
-          conversionRate: conversionRate || 21,
-          totalOrders: totalOrdersCount || 142,
-          totalGmv: totalGmv || 86450,
-          totalTables: totalTablesCount || 36,
+          totalRevenue: totalPlatformRevenue,
+          mrr,
+          totalRestaurants: allRestaurants.length,
+          activeRestaurants: activeRestroCount,
+          trialRestaurants: trialRestroCount,
+          inactiveRestaurants: inactiveRestroCount,
+          totalLeads,
+          convertedLeads,
+          conversionRate,
+          totalOrders: totalOrdersCount,
+          totalAllOrders: totalAllOrdersCount,
+          totalGmv: Math.round(totalGmv),
+          avgOrderValue,
+          todayOrders: todayOrders.length,
+          todayGmv: Math.round(todayGmv),
+          totalTables: totalTablesCount,
+          totalDishes: totalDishesCount,
+          totalDiners: totalCustomersCount,
+          totalReviews,
+          averageRating,
           pendingVerifications: pendingVerificationCount,
         },
         revenueTrends,
         onboardingTrends,
         packageDistribution,
         leadsFunnel,
+        cityDistribution,
+        orderStatusBreakdown,
         recentTransactions,
         recentLeads,
         expiringSoon,
@@ -298,10 +408,10 @@ exports.getSuperAdminAnalytics = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Error in getSuperAdminAnalytics:', error);
+    console.error('Super Admin Analytics Error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to fetch analytics records',
+      message: 'Failed to aggregate platform analytics records',
       error: error.message,
     });
   }
