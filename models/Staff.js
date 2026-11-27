@@ -71,6 +71,11 @@ const staffSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    pushTokens: [
+      {
+        type: String,
+      },
+    ],
   },
   { timestamps: true }
 );

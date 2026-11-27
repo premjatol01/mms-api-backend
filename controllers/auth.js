@@ -565,6 +565,28 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// @desc Save device push token (for mobile app lock-screen alerts)
+// @route POST /api/auth/push-token
+// @access Protected
+const savePushToken = async (req, res) => {
+  try {
+    const { pushToken } = req.body;
+    if (!pushToken) {
+      return res.status(400).json({ success: false, message: 'pushToken is required' });
+    }
+
+    const { registerDevicePushToken } = require('../utils/pushNotification');
+    await registerDevicePushToken(req.user._id, req.user.email, req.user.restaurantId, pushToken);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Push token registered successfully',
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   setupPassword,
   loginUser,
@@ -572,6 +594,7 @@ module.exports = {
   registerSuperAdmin,
   logoutUser,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  savePushToken
 };
 

@@ -4,6 +4,7 @@ const {
   emitToRestaurant,
   emitToAllRestaurants,
 } = require('../socket');
+const { sendPushToRestaurant } = require('./pushNotification');
 
 /**
  * Creates and delivers a notification (persists to DB and emits over Socket.io).
@@ -50,6 +51,16 @@ async function sendNotification({
       emitToAllRestaurants('notification:new', payload);
     } else if (restaurantId) {
       emitToRestaurant(restaurantId, 'notification:new', payload);
+      // Send mobile lockscreen push notification to restaurant staff devices
+      sendPushToRestaurant(restaurantId, {
+        title,
+        body: message,
+        data: {
+          actionUrl,
+          category,
+          metadata,
+        },
+      }).catch((e) => console.error('[PushNotification] Error sending push to restaurant:', e.message));
     }
 
     return doc;
