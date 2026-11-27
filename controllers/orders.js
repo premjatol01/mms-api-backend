@@ -1186,7 +1186,7 @@ exports.getAdminSessions = async (req, res) => {
     }
 
     const sessions = await Session.find(query)
-      .populate('tableId', 'tableNo tableId number status')
+      .populate('tableId', 'tableNo tableId number section capacity status')
       .populate('orderIds')
       .sort({ startedAt: -1 });
 
@@ -1637,26 +1637,30 @@ exports.markSessionPaid = async (req, res) => {
 
     const liveOrders = orders.filter((o) => o.status !== 'cancelled');
     const subtotal = liveOrders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
-    const discount = liveOrders.reduce((sum, o) => sum + (o.discount || 0), 0);
+    const ordersDiscount = liveOrders.reduce((sum, o) => sum + (o.discount || 0), 0);
+    const manualDiscount = Number(req.body.discount);
+    const appliedDiscount = !isNaN(manualDiscount) && manualDiscount >= 0
+      ? manualDiscount
+      : (ordersDiscount > 0 ? ordersDiscount : (session.discount || 0));
 
     let gst = 0;
     let total = 0;
     if (isGstEnabled && gstPercentage > 0) {
       if (chargeType === 'inclusive') {
-        gst = Math.round(Math.max(0, subtotal - discount) * (gstPercentage / (100 + gstPercentage)));
-        total = Math.max(0, subtotal - discount);
+        gst = Math.round(Math.max(0, subtotal - appliedDiscount) * (gstPercentage / (100 + gstPercentage)));
+        total = Math.max(0, subtotal - appliedDiscount);
       } else {
-        gst = Math.round(Math.max(0, subtotal - discount) * (gstPercentage / 100));
-        total = Math.max(0, subtotal - discount + gst);
+        gst = Math.round(Math.max(0, subtotal - appliedDiscount) * (gstPercentage / 100));
+        total = Math.max(0, subtotal - appliedDiscount + gst);
       }
     } else {
       gst = 0;
-      total = Math.max(0, subtotal - discount);
+      total = Math.max(0, subtotal - appliedDiscount);
     }
 
     const now = new Date();
     session.subtotal = subtotal;
-    session.discount = discount > 0 ? discount : (session.discount || 0);
+    session.discount = appliedDiscount;
     session.gst = gst;
     session.total = total;
     session.status = 'completed';
@@ -1664,6 +1668,10 @@ exports.markSessionPaid = async (req, res) => {
     const allowedMethods = ['cash', 'upi', 'card', 'online', 'other'];
     const pMethod = String(req.body.paymentMethod || 'cash').toLowerCase();
     session.paymentMethod = allowedMethods.includes(pMethod) ? pMethod : 'cash';
+    if (req.body.paymentRef) session.paymentRef = String(req.body.paymentRef).trim();
+    if (req.body.paymentNote) session.paymentNote = String(req.body.paymentNote).trim();
+    if (req.body.customerMobile) session.customerMobile = String(req.body.customerMobile).trim();
+    if (req.body.customerName) session.customerName = String(req.body.customerName).trim();
     session.paidAt = now;
     session.closedAt = now;
     session.orderIds = orders.map((o) => o._id);

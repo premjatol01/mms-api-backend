@@ -18,6 +18,8 @@ const sessionSchema = new mongoose.Schema({
     enum: ['cash', 'upi', 'card', 'online', 'other'],
     default: 'cash'
   },
+  paymentRef: { type: String, default: null },
+  paymentNote: { type: String, default: null },
   orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Order' }],
   subtotal: { type: Number, default: 0 },
   discount: { type: Number, default: 0 },
