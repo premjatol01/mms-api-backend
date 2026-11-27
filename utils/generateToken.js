@@ -10,9 +10,9 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (JWT_SECRET + '_ref
  * @param {string} restaurantId
  * @param {string} expiresIn
  */
-const generateAccessToken = (userId, role, restaurantId, expiresIn = '12h') => {
+const generateAccessToken = (userId, role, restaurantId, expiresIn = '12h', extraClaims = {}) => {
   return jwt.sign(
-    { userId, role, restaurantId, tokenType: 'access' },
+    { userId, role, restaurantId, tokenType: 'access', ...extraClaims },
     JWT_SECRET,
     { expiresIn }
   );
@@ -35,14 +35,14 @@ const generateRefreshToken = (userId, role, restaurantId, expiresIn = '30d') => 
 
 /**
  * Set HTTP cookies and return tokens based on role and rememberMe flag.
- * For Restaurant Admin:
+ * For Restaurant Admin / Staff:
  *   - rememberMe === true: 1-hour access token + 30-day refresh token
  *   - rememberMe === false: 12-hour access token ONLY (no refresh token)
  * For other roles:
  *   - Default 1-day access token
  */
-const setAuthCookiesAndTokens = (res, user, rememberMe = false) => {
-  const isRestroAdmin = user.role === 'restaurant_admin';
+const setAuthCookiesAndTokens = (res, user, rememberMe = false, extraClaims = {}) => {
+  const isRestroAdmin = user.role === 'restaurant_admin' || user.role === 'staff';
   const isProd = process.env.NODE_ENV !== 'development';
 
   let accessToken;
@@ -51,7 +51,7 @@ const setAuthCookiesAndTokens = (res, user, rememberMe = false) => {
   if (isRestroAdmin) {
     if (rememberMe) {
       // Remember Me checked: short-lived access token + long-lived refresh token
-      accessToken = generateAccessToken(user._id, user.role, user.restaurantId, '1h');
+      accessToken = generateAccessToken(user._id, user.role, user.restaurantId, '1h', extraClaims);
       refreshToken = generateRefreshToken(user._id, user.role, user.restaurantId, '30d');
 
       // Set refresh token cookie (30 days)
@@ -71,7 +71,7 @@ const setAuthCookiesAndTokens = (res, user, rememberMe = false) => {
       });
     } else {
       // Remember Me NOT checked: Access token expires strictly in 12 hours
-      accessToken = generateAccessToken(user._id, user.role, user.restaurantId, '12h');
+      accessToken = generateAccessToken(user._id, user.role, user.restaurantId, '12h', extraClaims);
 
       // Clear any prior refresh token cookie
       res.cookie('refreshToken', '', {
@@ -89,7 +89,7 @@ const setAuthCookiesAndTokens = (res, user, rememberMe = false) => {
     }
   } else {
     // Other roles: default 1-day token
-    accessToken = generateAccessToken(user._id, user.role, user.restaurantId, '1d');
+    accessToken = generateAccessToken(user._id, user.role, user.restaurantId, '1d', extraClaims);
     res.cookie('jwt', accessToken, {
       httpOnly: true,
       secure: isProd,

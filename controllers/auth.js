@@ -39,8 +39,41 @@ const loginUser = async (req, res) => {
         }
       }
 
+      // Check if this user is a registered staff member
+      const Staff = require('../models/Staff');
+      const staffDoc = await Staff.findOne({
+        email: user.email.toLowerCase(),
+        restaurantId: user.restaurantId,
+      });
+
+      let roleId = 'admin';
+      let roleName = 'Restaurant Admin';
+      let permissions = [];
+      let isOwner = true;
+      let isStaff = false;
+
+      if (staffDoc) {
+        roleId = staffDoc.roleId || 'manager';
+        roleName = staffDoc.roleName || 'Floor Manager';
+        permissions = staffDoc.permissions || [];
+        isOwner = Boolean(staffDoc.isOwner);
+        isStaff = !staffDoc.isOwner;
+        staffDoc.lastLoginAt = new Date();
+        await staffDoc.save();
+      }
+
+      const extraClaims = {
+        roleId,
+        roleName,
+        permissions,
+        isOwner,
+        isStaff,
+        name: staffDoc?.name || user.name,
+        email: user.email,
+      };
+
       const isRemember = Boolean(rememberMe);
-      const { accessToken, refreshToken } = setAuthCookiesAndTokens(res, user, isRemember);
+      const { accessToken, refreshToken } = setAuthCookiesAndTokens(res, user, isRemember, extraClaims);
 
       // Update last login timestamp and refresh token record
       user.lastLoginAt = new Date();
@@ -54,16 +87,21 @@ const loginUser = async (req, res) => {
         data: {
           user: {
             _id: user._id,
-            name: user.name,
+            name: staffDoc?.name || user.name,
             email: user.email,
             role: user.role,
-            restaurantId: user.restaurantId
+            roleId,
+            roleName,
+            permissions,
+            isOwner,
+            isStaff,
+            restaurantId: user.restaurantId,
           },
           token: accessToken,
           refreshToken: refreshToken || undefined,
-          rememberMe: isRemember
+          rememberMe: isRemember,
         },
-        message: 'Logged in successfully'
+        message: 'Logged in successfully',
       });
     } else {
       res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -174,8 +212,38 @@ const refreshTokenHandler = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Refresh token has been revoked' });
     }
 
+    // Fetch staff profile if this user is a staff member
+    let extraClaims = {
+      isStaff: false,
+      isOwner: true,
+      roleId: 'admin',
+      roleName: 'Restaurant Admin',
+      permissions: []
+    };
+
+    try {
+      const Staff = require('../models/Staff');
+      const staffDoc = await Staff.findOne({
+        email: user.email.toLowerCase(),
+        restaurantId: user.restaurantId,
+        status: { $ne: 'deleted' }
+      });
+
+      if (staffDoc) {
+        extraClaims = {
+          isStaff: true,
+          isOwner: false,
+          roleId: staffDoc.roleId,
+          roleName: staffDoc.roleName,
+          permissions: staffDoc.permissions || []
+        };
+      }
+    } catch (errStaff) {
+      console.error('Error attaching staff claims in refresh-token:', errStaff.message);
+    }
+
     // Generate fresh access token (1 hour)
-    const newAccessToken = generateAccessToken(user._id, user.role, user.restaurantId, '1h');
+    const newAccessToken = generateAccessToken(user._id, user.role, user.restaurantId, '1h', extraClaims);
 
     // Update access cookie
     res.cookie('jwt', newAccessToken, {
@@ -194,7 +262,12 @@ const refreshTokenHandler = async (req, res) => {
           name: user.name,
           email: user.email,
           role: user.role,
-          restaurantId: user.restaurantId
+          restaurantId: user.restaurantId,
+          roleId: extraClaims.roleId,
+          roleName: extraClaims.roleName,
+          permissions: extraClaims.permissions,
+          isStaff: extraClaims.isStaff,
+          isOwner: extraClaims.isOwner
         }
       },
       message: 'Token refreshed successfully'
