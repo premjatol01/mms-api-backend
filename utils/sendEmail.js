@@ -1,18 +1,60 @@
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
+/**
+ * Universal Email Sender (Hybrid: Resend HTTP API + SMTP)
+ *
+ * Mode selection:
+ * 1. If EMAIL_PROVIDER === 'resend' OR RESEND_API_KEY is present without SMTP_ENABLED=true:
+ *    Uses Resend over HTTPS (Port 443). 100% immune to Render/Vercel port blocks.
+ * 2. If EMAIL_PROVIDER === 'smtp' OR (SMTP_HOST and SMTP_EMAIL are configured):
+ *    Uses standard Nodemailer SMTP (Port 587 / 465).
+ */
 const sendEmail = async (options) => {
+  const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase();
+  const hasResend = Boolean(process.env.RESEND_API_KEY);
+  const useResend = provider === 'resend' || (hasResend && provider !== 'smtp');
+
+  // --- PATH 1: Resend HTTP API (For testing on Render / Vercel without port blocks) ---
+  if (useResend) {
+    if (!process.env.RESEND_API_KEY) {
+      throw new Error('[Email] RESEND_API_KEY is required when using Resend provider.');
+    }
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    // On free Resend test tier without domain setup, from must be "onboarding@resend.dev"
+    // When you verify your domain, you can set FROM_EMAIL=team@yourdomain.com
+    const fromAddress =
+      process.env.RESEND_FROM_EMAIL ||
+      process.env.FROM_EMAIL ||
+      'Tablly <onboarding@resend.dev>';
+
+    const res = await resend.emails.send({
+      from: fromAddress,
+      to: options.email,
+      subject: options.subject,
+      html: options.html || options.message,
+    });
+
+    if (res.error) {
+      console.error('[Resend Error]:', res.error);
+      throw new Error(res.error.message || 'Failed to dispatch email via Resend');
+    }
+
+    console.log('[Resend] Email sent successfully! ID:', res.data?.id);
+    return res.data;
+  }
+
+  // --- PATH 2: Standard SMTP (For local or live production on dedicated host / paid Render) ---
   const port = Number(process.env.SMTP_PORT) || 587;
   const isPort465 = port === 465;
-
-  // Clean password by stripping any accidental spaces (standard with Gmail App Passwords)
   const cleanPassword = process.env.SMTP_PASSWORD ? String(process.env.SMTP_PASSWORD).replace(/\s+/g, '') : '';
 
-  // Create a transporter resilient to Vercel/serverless environments
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: port,
-    secure: isPort465, // true for port 465 (direct SSL), false for port 587 (STARTTLS)
-    requireTLS: !isPort465, // Upgrade unencrypted connection to TLS on port 587
+    secure: isPort465,
+    requireTLS: !isPort465,
     auth: {
       user: process.env.SMTP_EMAIL,
       pass: cleanPassword,
@@ -20,12 +62,11 @@ const sendEmail = async (options) => {
     tls: {
       rejectUnauthorized: true,
     },
-    connectionTimeout: 7000, // 7 seconds (avoids hitting Vercel's 10s function kill limit)
+    connectionTimeout: 7000,
     greetingTimeout: 7000,
     socketTimeout: 7000,
   });
 
-  // Define email options
   const message = {
     from: `${process.env.FROM_NAME || 'Tablly'} <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
     to: options.email,
@@ -33,10 +74,8 @@ const sendEmail = async (options) => {
     html: options.html || options.message,
   };
 
-  // Send the email
   const info = await transporter.sendMail(message);
-
-  console.log('Message sent: %s', info.messageId);
+  console.log('[SMTP] Message sent: %s', info.messageId);
   return info;
 };
 
