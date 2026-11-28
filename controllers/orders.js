@@ -1879,6 +1879,36 @@ exports.requestWaiter = async (req, res) => {
   }
 };
 
+// @route   POST /api/orders/waiter/acknowledge
+// @desc    Staff acknowledges or resolves a customer waiter call and notifies the customer table
+// @access  Protected (Restaurant Staff / Admin)
+exports.acknowledgeWaiter = async (req, res) => {
+  try {
+    const { tableId, staffName, message = 'A waiter is on the way to assist you!' } = req.body;
+    if (!tableId) {
+      return res.status(400).json({ success: false, message: 'Table ID is required' });
+    }
+
+    const responder = staffName || req.user?.name || 'A team member';
+
+    // Notify customer table room via real-time WebSocket
+    emitToTable(tableId, 'waiter:acknowledged', {
+      tableId,
+      staffName: responder,
+      message: `${responder} is on the way to assist your table!`,
+      acknowledgedAt: new Date(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Waiter call acknowledged successfully',
+    });
+  } catch (error) {
+    console.error('Error acknowledging waiter call:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // @route   POST /api/orders/sessions/:sessionId/bill
 // @desc    Mark bill as requested / generated for a table session (moves table to Billed state)
 // @access  Protected

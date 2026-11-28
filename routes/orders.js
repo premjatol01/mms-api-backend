@@ -17,7 +17,8 @@ const {
   serveAllInSession,
   markSessionPaid,
   endSessionDirectly,
-  requestBillSession
+  requestBillSession,
+  acknowledgeWaiter
 } = require('../controllers/orders');
 
 // ─── Public routes (Customer QR Order Portal) ──────────────────────────────
@@ -41,5 +42,6 @@ router.post('/sessions/:sessionId/serve-all', serveAllInSession);
 router.post('/sessions/:sessionId/bill', requestBillSession);
 router.post('/sessions/:sessionId/pay', markSessionPaid);
 router.post('/sessions/:sessionId/end', endSessionDirectly);
+router.post('/waiter/acknowledge', acknowledgeWaiter);
 
 module.exports = router;
