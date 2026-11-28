@@ -71,4 +71,61 @@ router.get('/status', async (req, res) => {
   }
 });
 
+// @route   POST /api/test/email (or GET /api/test/email?to=...)
+// @desc    Diagnose email dispatch live on Render/Vercel and return detailed provider logs
+router.all('/email', async (req, res) => {
+  const sendEmail = require('../utils/sendEmail');
+  const targetEmail = req.query.to || req.body?.to || process.env.SMTP_EMAIL || 'test@example.com';
+
+  const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase();
+  const hasResend = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_your_api_key_here');
+  const activeMode = provider === 'resend' || (hasResend && provider !== 'smtp') ? 'resend' : 'smtp';
+
+  try {
+    console.log(`[Diagnostic Email] Sending test email to ${targetEmail} via ${activeMode}...`);
+    const result = await sendEmail({
+      email: targetEmail,
+      subject: `[Tablly Diagnostic] Test Email (${activeMode.toUpperCase()})`,
+      html: `
+        <div style="font-family: sans-serif; padding: 20px;">
+          <h2>Tablly Email Diagnostics</h2>
+          <p>This is a test email dispatched from <strong>${activeMode.toUpperCase()}</strong>.</p>
+          <p>Timestamp: ${new Date().toISOString()}</p>
+          <p>Recipient: ${targetEmail}</p>
+        </div>
+      `,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Test email successfully dispatched to ${targetEmail}`,
+      activeMode,
+      details: result,
+      env: {
+        EMAIL_PROVIDER: process.env.EMAIL_PROVIDER || '(not set)',
+        hasResendApiKey: Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_your_api_key_here'),
+        SMTP_HOST: process.env.SMTP_HOST || '(not set)',
+        SMTP_PORT: process.env.SMTP_PORT || '(not set)',
+        SMTP_EMAIL: process.env.SMTP_EMAIL ? `${process.env.SMTP_EMAIL.slice(0, 3)}***` : '(not set)',
+      }
+    });
+  } catch (err) {
+    console.error('[Diagnostic Email Error]:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Email dispatch failed',
+      activeMode,
+      error: err.message,
+      stack: process.env.NODE_ENV !== 'production' ? err.stack : undefined,
+      env: {
+        EMAIL_PROVIDER: process.env.EMAIL_PROVIDER || '(not set)',
+        hasResendApiKey: Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_your_api_key_here'),
+        SMTP_HOST: process.env.SMTP_HOST || '(not set)',
+        SMTP_PORT: process.env.SMTP_PORT || '(not set)',
+        SMTP_EMAIL: process.env.SMTP_EMAIL ? `${process.env.SMTP_EMAIL.slice(0, 3)}***` : '(not set)',
+      }
+    });
+  }
+});
+
 module.exports = router;
