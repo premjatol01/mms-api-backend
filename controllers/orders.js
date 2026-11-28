@@ -450,12 +450,22 @@ exports.placePublicOrder = async (req, res) => {
     }
 
     // 1. Mandatory 10-digit mobile number verification
-    const cleanMobile = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : (session?.customerMobile || null);
+    const cleanMobile = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : null;
     if (!cleanMobile || cleanMobile.length !== 10) {
       return res.status(400).json({
         success: false,
         errorType: 'MOBILE_REQUIRED',
         message: 'A valid 10-digit mobile number is mandatory to place your order.'
+      });
+    }
+
+    // Check if customer mobile is strictly verified via OTP
+    const isMobileVerified = await Customer.exists({ mobile: cleanMobile, isVerified: true });
+    if (!isMobileVerified) {
+      return res.status(403).json({
+        success: false,
+        errorType: 'MOBILE_NOT_VERIFIED',
+        message: 'Please verify your mobile number with OTP before placing your order.'
       });
     }
 

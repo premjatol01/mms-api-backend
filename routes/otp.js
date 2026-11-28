@@ -136,6 +136,14 @@ router.post('/verify', async (req, res) => {
     // Success: Delete the OTP record so it cannot be reused
     await OtpVerification.deleteOne({ _id: record._id });
 
+    // Mark any Customer records matching this mobile number as verified
+    try {
+      const Customer = require('../models/Customer');
+      await Customer.updateMany({ mobile: cleanMobile }, { $set: { isVerified: true } });
+    } catch (custErr) {
+      console.warn('Could not update customer verified flag:', custErr.message);
+    }
+
     return res.status(200).json({
       success: true,
       verified: true,

@@ -13,6 +13,11 @@ const customerSchema = new mongoose.Schema({
     trim: true,
     index: true
   },
+  isVerified: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
   name: {
     type: String,
     trim: true,
