@@ -335,6 +335,13 @@ exports.toggleStaffStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Staff member not found' });
     }
 
+    if (staffMember.status === 'pending_activation') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot manually activate an unverified account. The user must set their password using the email invitation link.',
+      });
+    }
+
     const nextStatus = staffMember.status === 'active' ? 'inactive' : 'active';
     staffMember.status = nextStatus;
     await staffMember.save();
